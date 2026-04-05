@@ -1,0 +1,12 @@
+numpy
+pandas
+scikit-learn
+matplotlib
+seaborn
+gradio
+langgraph
+pydantic
+openpyxl
+jupyter
+ipykernel
+pytest
