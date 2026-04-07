@@ -29,7 +29,7 @@ Inside that function, write these artifacts into `workspace_path`:
 - `cleaned_frame.csv`
 - `feature_frame.csv`
 - `target.csv`
-- `split_manifest.json`
+- `split_manifest.json` as a JSON object with `train_indices` and `test_indices` arrays
 - `preprocessing_report.json`
 
 ## Notes

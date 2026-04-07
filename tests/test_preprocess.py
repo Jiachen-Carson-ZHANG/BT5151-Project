@@ -10,6 +10,7 @@ from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.preprocess import generate_preprocessing_code
 from bt5151_credit_risk.preprocess import inspect_preprocessing_code
+from bt5151_credit_risk.preprocess import validate_preprocessing_output
 
 
 @pytest.fixture
@@ -253,6 +254,144 @@ def _sample_column_transform_spec():
     }
 
 
+def _generated_preprocessing_code(feature_frame_expression: str, split_manifest: dict) -> dict:
+    return {
+        "code": (
+            "from pathlib import Path\n"
+            "import json\n"
+            "\n"
+            "def run_preprocessing(raw_df, workspace_path):\n"
+            "    workspace = Path(workspace_path)\n"
+            "    cleaned = raw_df.copy()\n"
+            f"    feature_frame = {feature_frame_expression}\n"
+            "    target = cleaned['Credit_Score']\n"
+            "    cleaned.to_csv(workspace / 'cleaned_frame.csv', index=False)\n"
+            "    feature_frame.to_csv(workspace / 'feature_frame.csv', index=False)\n"
+            "    target.to_frame(name='Credit_Score').to_csv(workspace / 'target.csv', index=False)\n"
+            f"    (workspace / 'split_manifest.json').write_text(json.dumps({split_manifest!r}))\n"
+            "    (workspace / 'preprocessing_report.json').write_text(json.dumps({'status': 'ok'}))\n"
+            "    return {'status': 'ok'}\n"
+        ),
+        "entrypoint": "run_preprocessing",
+    }
+
+
+def test_validate_preprocessing_output_passes_on_expected_artifacts(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is True
+    assert result["checks"]["feature_frame_non_empty"] is True
+    assert result["checks"]["split_manifest_exists"] is True
+    assert result["checks"]["target_file_exists"] is True
+    assert result["checks"]["target_excluded"] is True
+    assert result["checks"]["group_overlap_zero"] is True
+    assert result["errors"] == []
+
+
+def test_validate_preprocessing_output_reports_missing_split_manifest(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    Path(execution_result["artifacts"]["split_manifest.json"]).unlink()
+
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["split_manifest_exists"] is False
+    assert any(error["rule"] == "split_manifest_exists" for error in result["errors"])
+
+
+def test_validate_preprocessing_output_reports_target_in_feature_frame(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.copy()",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["target_excluded"] is False
+    assert any(error["rule"] == "target_excluded" for error in result["errors"])
+
+
+def test_validate_preprocessing_output_reports_group_overlap_for_grouped_split(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [3, 4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["group_overlap_zero"] is False
+    assert any(error["rule"] == "group_overlap_zero" for error in result["errors"])
+
+
+def test_validate_preprocessing_output_reports_empty_feature_frame(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.head(0).drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["feature_frame_non_empty"] is False
+    assert any(error["rule"] == "feature_frame_non_empty" for error in result["errors"])
+
+
+def test_validate_preprocessing_output_reports_missing_target_file(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    Path(execution_result["artifacts"]["target.csv"]).unlink()
+
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["target_file_exists"] is False
+    assert any(error["rule"] == "target_file_exists" for error in result["errors"])
+
+
 def test_execute_preprocessing_drops_identifier_columns_and_splits_groups(sample_frame):
     result = execute_preprocessing(
         sample_frame,
@@ -269,25 +408,10 @@ def test_execute_preprocessing_drops_identifier_columns_and_splits_groups(sample
 
 
 def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_frame, tmp_path):
-    generated_code = {
-        "code": (
-            "from pathlib import Path\n"
-            "import json\n"
-            "\n"
-            "def run_preprocessing(raw_df, workspace_path):\n"
-            "    workspace = Path(workspace_path)\n"
-            "    cleaned = raw_df.copy()\n"
-            "    feature_frame = cleaned.drop(columns=['Credit_Score'])\n"
-            "    target = cleaned['Credit_Score']\n"
-            "    cleaned.to_csv(workspace / 'cleaned_frame.csv', index=False)\n"
-            "    feature_frame.to_csv(workspace / 'feature_frame.csv', index=False)\n"
-            "    target.to_frame(name='Credit_Score').to_csv(workspace / 'target.csv', index=False)\n"
-            "    (workspace / 'split_manifest.json').write_text(json.dumps({'train_rows': 4, 'test_rows': 2}))\n"
-            "    (workspace / 'preprocessing_report.json').write_text(json.dumps({'status': 'ok'}))\n"
-            "    return {'status': 'ok'}\n"
-        ),
-        "entrypoint": "run_preprocessing",
-    }
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
 
     result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
 
@@ -328,7 +452,7 @@ def test_execute_generated_preprocessing_honors_declared_entrypoint(sample_frame
             "    cleaned.to_csv(workspace / 'cleaned_frame.csv', index=False)\n"
             "    feature_frame.to_csv(workspace / 'feature_frame.csv', index=False)\n"
             "    target.to_frame(name='Credit_Score').to_csv(workspace / 'target.csv', index=False)\n"
-            "    (workspace / 'split_manifest.json').write_text(json.dumps({'train_rows': 4, 'test_rows': 2}))\n"
+            "    (workspace / 'split_manifest.json').write_text(json.dumps({'train_indices': [0, 1, 2, 3], 'test_indices': [4, 5]}))\n"
             "    (workspace / 'preprocessing_report.json').write_text(json.dumps({'status': 'ok', 'entrypoint': 'custom_preprocessing'}))\n"
             "    return {'entrypoint': 'custom_preprocessing'}\n"
         ),

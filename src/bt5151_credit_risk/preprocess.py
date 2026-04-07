@@ -1,4 +1,5 @@
 import ast
+import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -259,6 +260,136 @@ def execute_generated_preprocessing(
         "success": execution_log["timed_out"] is False
         and execution_log["returncode"] == 0
         and not missing_artifacts,
+    }
+
+
+def validate_preprocessing_output(
+    execution_result: dict,
+    dataset_policy_spec: dict,
+    column_transform_spec: dict,
+) -> dict:
+    artifacts = execution_result.get("artifacts", {})
+    workspace_path = Path(execution_result.get("workspace_path", ""))
+    raw_frame_path = Path(execution_result.get("raw_frame_path", workspace_path / "raw_frame.csv"))
+    feature_frame_path = Path(artifacts.get("feature_frame.csv", ""))
+    target_path = Path(artifacts.get("target.csv", ""))
+    split_manifest_path = Path(artifacts.get("split_manifest.json", ""))
+    target_column = dataset_policy_spec.get("target_column", TARGET_COLUMN)
+    group_column = dataset_policy_spec.get("group_column", GROUP_COLUMN)
+    split_strategy = dataset_policy_spec.get("split_strategy", {})
+
+    checks: dict[str, bool] = {}
+    errors: list[dict] = []
+
+    def add_check(rule: str, passed: bool, message: str) -> None:
+        checks[rule] = passed
+        if not passed:
+            errors.append({"rule": rule, "message": message})
+
+    add_check(
+        "split_manifest_exists",
+        split_manifest_path.is_file(),
+        f"Split manifest was not found at {split_manifest_path}.",
+    )
+    add_check(
+        "target_file_exists",
+        target_path.is_file(),
+        f"Target file was not found at {target_path}.",
+    )
+
+    feature_frame = None
+    if feature_frame_path.is_file():
+        try:
+            feature_frame = pd.read_csv(feature_frame_path)
+        except Exception as exc:  # pragma: no cover - defensive parsing guard
+            errors.append(
+                {
+                    "rule": "feature_frame_readable",
+                    "message": f"Feature frame could not be read from {feature_frame_path}: {exc}",
+                }
+            )
+            checks["feature_frame_readable"] = False
+        else:
+            checks["feature_frame_readable"] = True
+            add_check(
+                "target_excluded",
+                target_column not in feature_frame.columns,
+                f"Target column '{target_column}' is still present in the feature frame.",
+            )
+            add_check(
+                "feature_frame_non_empty",
+                not feature_frame.empty,
+                f"Feature frame at {feature_frame_path} is empty.",
+            )
+    else:
+        checks["feature_frame_readable"] = False
+        checks["target_excluded"] = False
+        checks["feature_frame_non_empty"] = False
+        errors.append(
+            {
+                "rule": "feature_frame_exists",
+                "message": f"Feature frame was not found at {feature_frame_path}.",
+            }
+        )
+        errors.append(
+            {
+                "rule": "target_excluded",
+                "message": f"Feature frame is unavailable, so target exclusion could not be verified.",
+            }
+        )
+        errors.append(
+            {
+                "rule": "feature_frame_non_empty",
+                "message": f"Feature frame is unavailable, so non-empty validation could not be performed.",
+            }
+        )
+
+    if split_strategy.get("type") == "grouped_holdout" and group_column:
+        group_overlap_zero = False
+        if split_manifest_path.is_file() and raw_frame_path.is_file():
+            try:
+                manifest = json.loads(split_manifest_path.read_text(encoding="utf-8"))
+                train_indices = manifest["train_indices"]
+                test_indices = manifest["test_indices"]
+                raw_frame = pd.read_csv(raw_frame_path)
+                train_groups = set(raw_frame.iloc[train_indices][group_column].dropna().tolist())
+                test_groups = set(raw_frame.iloc[test_indices][group_column].dropna().tolist())
+                group_overlap_zero = train_groups.isdisjoint(test_groups)
+            except Exception as exc:  # pragma: no cover - defensive parsing guard
+                errors.append(
+                    {
+                        "rule": "group_overlap_zero",
+                        "message": (
+                            "Grouped split overlap could not be validated "
+                            f"using {split_manifest_path} and {raw_frame_path}: {exc}"
+                        ),
+                    }
+                )
+        else:
+            errors.append(
+                {
+                    "rule": "group_overlap_zero",
+                    "message": (
+                        "Grouped split overlap could not be validated because the raw frame "
+                        "or split manifest is missing."
+                    ),
+                }
+            )
+        checks["group_overlap_zero"] = group_overlap_zero
+        if not group_overlap_zero and not any(error["rule"] == "group_overlap_zero" for error in errors):
+            errors.append(
+                {
+                    "rule": "group_overlap_zero",
+                    "message": "Grouped split contains overlapping group values between train and test.",
+                }
+            )
+    else:
+        checks["group_overlap_zero"] = True
+
+    return {
+        "passed": all(checks.values()) and not errors,
+        "checks": checks,
+        "errors": errors,
     }
 
 
