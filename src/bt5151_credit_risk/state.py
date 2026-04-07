@@ -10,9 +10,17 @@ class CreditRiskState(BaseModel):
     dataset_profile: dict | None = None
     dataset_policy_spec: dict | None = None
     column_transform_spec: dict | None = None
+    preprocessing_code: dict | None = None
+    preprocessing_codegen_metadata: dict | None = None
+    preprocessing_code_review: dict | None = None
     preprocessing_rules: dict | None = None
+    preprocessing_workspace: str | None = None
+    preprocessing_artifacts: dict | None = None
+    preprocessing_execution_log: dict | None = None
     preprocessing_execution_report: dict | None = None
     preprocessing_audit_report: dict | None = None
+    preprocessing_validation_report: dict | None = None
+    preprocessing_attempt_count: int | None = None
     feature_columns: list[str] | None = None
     class_names: list[str] | None = None
     label_to_id: dict | None = None

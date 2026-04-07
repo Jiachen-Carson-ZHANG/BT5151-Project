@@ -27,5 +27,13 @@ def test_state_has_expected_keys():
     assert state.raw_dataset_path == "train.csv"
     assert state.dataset_policy_spec is None
     assert state.column_transform_spec is None
+    assert state.preprocessing_code is None
+    assert state.preprocessing_codegen_metadata is None
+    assert state.preprocessing_code_review is None
+    assert state.preprocessing_workspace is None
+    assert state.preprocessing_artifacts is None
+    assert state.preprocessing_execution_log is None
     assert state.preprocessing_execution_report is None
     assert state.preprocessing_audit_report is None
+    assert state.preprocessing_validation_report is None
+    assert state.preprocessing_attempt_count is None
