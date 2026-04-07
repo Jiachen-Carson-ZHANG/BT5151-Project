@@ -1,0 +1,27 @@
+import pandas as pd
+import pytest
+
+from bt5151_credit_risk.profile import build_dataset_profile
+from bt5151_credit_risk.state import CreditRiskState
+
+
+@pytest.fixture
+def sample_frame():
+    return pd.DataFrame(
+        [
+            {"Credit_Score": "Good", "Age": 25, "Outstanding_Debt": 1000.0},
+            {"Credit_Score": "Poor", "Age": None, "Outstanding_Debt": 2500.0},
+        ]
+    )
+
+
+def test_dataset_profile_contains_core_fields(sample_frame):
+    profile = build_dataset_profile(sample_frame)
+    assert "row_count" in profile
+    assert "target_distribution" in profile
+    assert "missing_counts" in profile
+
+
+def test_state_has_expected_keys():
+    state = CreditRiskState(raw_dataset_path="train.csv")
+    assert state.raw_dataset_path == "train.csv"
