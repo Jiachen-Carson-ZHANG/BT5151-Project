@@ -1,5 +1,9 @@
 import ast
+import subprocess
+import sys
 from dataclasses import dataclass
+from pathlib import Path
+from uuid import uuid4
 
 import pandas as pd
 from sklearn.model_selection import GroupShuffleSplit
@@ -144,6 +148,112 @@ def inspect_preprocessing_code(generated_code: dict) -> dict:
         "passed": not issues,
         "entrypoint": entrypoint,
         "issues": issues,
+    }
+
+
+def execute_generated_preprocessing(
+    raw_df: pd.DataFrame,
+    generated_code: dict,
+    run_root,
+) -> dict:
+    run_root_path = Path(run_root)
+    run_root_path.mkdir(parents=True, exist_ok=True)
+
+    workspace_path = run_root_path / f"generated_preprocessing_{uuid4().hex}"
+    workspace_path.mkdir(parents=True, exist_ok=False)
+
+    raw_frame_path = workspace_path / "raw_frame.csv"
+    code_path = workspace_path / "generated_preprocessing.py"
+    runner_path = workspace_path / "_execute_generated_preprocessing.py"
+
+    raw_df.to_csv(raw_frame_path, index=False)
+    code_path.write_text(generated_code.get("code", ""), encoding="utf-8")
+    runner_path.write_text(
+        "\n".join(
+            [
+                "import importlib.util",
+                "import json",
+                "import sys",
+                "from pathlib import Path",
+                "",
+                "import pandas as pd",
+                "",
+                "",
+                "def main() -> None:",
+                "    code_path = Path(sys.argv[1])",
+                "    raw_frame_path = Path(sys.argv[2])",
+                "    workspace_path = Path(sys.argv[3])",
+                "    spec = importlib.util.spec_from_file_location(\"generated_preprocessing\", code_path)",
+                "    module = importlib.util.module_from_spec(spec)",
+                "    assert spec.loader is not None",
+                "    spec.loader.exec_module(module)",
+                "    raw_df = pd.read_csv(raw_frame_path)",
+                "    result = module.run_preprocessing(raw_df, workspace_path)",
+                "    if result is not None:",
+                "        print(json.dumps(result, default=str))",
+                "",
+                "",
+                "if __name__ == \"__main__\":",
+                "    main()",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    timeout_seconds = 60
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(runner_path), str(code_path), str(raw_frame_path), str(workspace_path)],
+            cwd=workspace_path,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+            check=False,
+        )
+        execution_log = {
+            "returncode": completed.returncode,
+            "stdout": completed.stdout,
+            "stderr": completed.stderr,
+            "timed_out": False,
+            "timeout_seconds": timeout_seconds,
+        }
+    except subprocess.TimeoutExpired as exc:
+        execution_log = {
+            "returncode": None,
+            "stdout": exc.stdout or "",
+            "stderr": exc.stderr or "",
+            "timed_out": True,
+            "timeout_seconds": timeout_seconds,
+        }
+
+    required_artifacts = [
+        "cleaned_frame.csv",
+        "feature_frame.csv",
+        "target.csv",
+        "split_manifest.json",
+        "preprocessing_report.json",
+    ]
+    artifacts = {
+        artifact_name: str(workspace_path / artifact_name) for artifact_name in required_artifacts
+    }
+    missing_artifacts = [
+        artifact_name for artifact_name, artifact_path in artifacts.items() if not Path(artifact_path).is_file()
+    ]
+
+    return {
+        "workspace_path": str(workspace_path),
+        "run_root": str(run_root_path),
+        "raw_frame_path": str(raw_frame_path),
+        "code_path": str(code_path),
+        "runner_path": str(runner_path),
+        "entrypoint": generated_code.get("entrypoint", "run_preprocessing"),
+        "artifacts": artifacts,
+        "missing_artifacts": missing_artifacts,
+        "execution_log": execution_log,
+        "success": execution_log["timed_out"] is False
+        and execution_log["returncode"] == 0
+        and not missing_artifacts,
     }
 
 

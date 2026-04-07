@@ -1,8 +1,11 @@
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
 from bt5151_credit_risk.preprocess import audit_preprocessing_output
 from bt5151_credit_risk.preprocess import execute_preprocessing
+from bt5151_credit_risk.preprocess import execute_generated_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.preprocess import generate_preprocessing_code
@@ -141,7 +144,7 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
-            "code": "def run_preprocessing(df):\n    return df",
+            "code": "def run_preprocessing(raw_df, workspace_path):\n    return raw_df",
             "entrypoint": "run_preprocessing",
         }
 
@@ -163,7 +166,7 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
         column_transform_spec,
     )
 
-    assert result["code"] == "def run_preprocessing(df):\n    return df"
+    assert result["code"] == "def run_preprocessing(raw_df, workspace_path):\n    return raw_df"
     assert result["entrypoint"] == "run_preprocessing"
     assert captured["system_prompt"] == "runtime system prompt"
     assert captured["payload"]["dataset_profile"] == dataset_profile
@@ -263,6 +266,49 @@ def test_execute_preprocessing_drops_identifier_columns_and_splits_groups(sample
     assert "SSN" not in result.feature_frame.columns
     assert "Credit_Score" not in result.feature_frame.columns
     assert set(result.train_groups).isdisjoint(set(result.test_groups))
+
+
+def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_frame, tmp_path):
+    generated_code = {
+        "code": (
+            "from pathlib import Path\n"
+            "import json\n"
+            "\n"
+            "def run_preprocessing(raw_df, workspace_path):\n"
+            "    workspace = Path(workspace_path)\n"
+            "    cleaned = raw_df.copy()\n"
+            "    feature_frame = cleaned.drop(columns=['Credit_Score'])\n"
+            "    target = cleaned['Credit_Score']\n"
+            "    cleaned.to_csv(workspace / 'cleaned_frame.csv', index=False)\n"
+            "    feature_frame.to_csv(workspace / 'feature_frame.csv', index=False)\n"
+            "    target.to_frame(name='Credit_Score').to_csv(workspace / 'target.csv', index=False)\n"
+            "    (workspace / 'split_manifest.json').write_text(json.dumps({'train_rows': 4, 'test_rows': 2}))\n"
+            "    (workspace / 'preprocessing_report.json').write_text(json.dumps({'status': 'ok'}))\n"
+            "    return {'status': 'ok'}\n"
+        ),
+        "entrypoint": "run_preprocessing",
+    }
+
+    result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+
+    workspace_path = Path(result["workspace_path"])
+    assert workspace_path.is_dir()
+    assert workspace_path.parent == tmp_path
+    assert Path(result["code_path"]).is_file()
+
+    for artifact_name in [
+        "cleaned_frame.csv",
+        "feature_frame.csv",
+        "target.csv",
+        "split_manifest.json",
+        "preprocessing_report.json",
+    ]:
+        assert Path(result["artifacts"][artifact_name]).is_file()
+
+    execution_log = result["execution_log"]
+    assert execution_log["returncode"] == 0
+    assert "stdout" in execution_log
+    assert "stderr" in execution_log
 
 
 def test_audit_preprocessing_output_reports_key_checks_passed(sample_frame):
