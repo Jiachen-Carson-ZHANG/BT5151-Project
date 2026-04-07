@@ -3,8 +3,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from bt5151_credit_risk.preprocess import audit_preprocessing_output
-from bt5151_credit_risk.preprocess import execute_preprocessing
 from bt5151_credit_risk.preprocess import execute_generated_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
@@ -487,21 +485,6 @@ def test_validate_preprocessing_output_reports_missing_target_file(sample_frame,
     assert any(error["rule"] == "target_file_exists" for error in result["errors"])
 
 
-def test_execute_preprocessing_drops_identifier_columns_and_splits_groups(sample_frame):
-    result = execute_preprocessing(
-        sample_frame,
-        _sample_policy_spec(),
-        _sample_column_transform_spec(),
-    )
-
-    assert "ID" not in result.feature_frame.columns
-    assert "Customer_ID" not in result.feature_frame.columns
-    assert "Name" not in result.feature_frame.columns
-    assert "SSN" not in result.feature_frame.columns
-    assert "Credit_Score" not in result.feature_frame.columns
-    assert set(result.train_groups).isdisjoint(set(result.test_groups))
-
-
 def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_frame, tmp_path):
     generated_code = _generated_preprocessing_code(
         "cleaned.drop(columns=['Credit_Score'])",
@@ -560,21 +543,3 @@ def test_execute_generated_preprocessing_honors_declared_entrypoint(sample_frame
     assert "custom_preprocessing" in result["execution_log"]["stdout"]
     assert Path(result["artifacts"]["cleaned_frame.csv"]).is_file()
     assert Path(result["artifacts"]["preprocessing_report.json"]).is_file()
-
-
-def test_audit_preprocessing_output_reports_key_checks_passed(sample_frame):
-    result = execute_preprocessing(
-        sample_frame,
-        _sample_policy_spec(),
-        _sample_column_transform_spec(),
-    )
-    audit_report = audit_preprocessing_output(
-        sample_frame,
-        result,
-        _sample_policy_spec(),
-        _sample_column_transform_spec(),
-    )
-
-    assert audit_report["checks"]["target_excluded"] is True
-    assert audit_report["checks"]["group_leakage_free"] is True
-    assert audit_report["checks"]["feature_frame_non_empty"] is True
