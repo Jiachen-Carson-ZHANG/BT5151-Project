@@ -5,6 +5,7 @@ from bt5151_credit_risk.preprocess import audit_preprocessing_output
 from bt5151_credit_risk.preprocess import execute_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
+from bt5151_credit_risk.preprocess import generate_preprocessing_code
 
 
 @pytest.fixture
@@ -126,6 +127,49 @@ def test_generate_column_transform_spec_returns_column_rules(sample_frame, monke
 
     assert spec["columns"]["Age"]["imputation"] == "median"
     assert spec["columns"]["Occupation"]["encoding"] == "one_hot"
+
+
+def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sample_frame, monkeypatch):
+    captured = {}
+
+    def fake_load_skill_prompt(skill_name):
+        assert skill_name == "generate-preprocessing-code"
+        return "runtime system prompt"
+
+    def fake_codegen_agent(system_prompt, payload):
+        captured["system_prompt"] = system_prompt
+        captured["payload"] = payload
+        return {
+            "code": "def run_preprocessing(df):\n    return df",
+            "entrypoint": "run_preprocessing",
+        }
+
+    monkeypatch.setattr("bt5151_credit_risk.preprocess.load_skill_prompt", fake_load_skill_prompt)
+    monkeypatch.setattr("bt5151_credit_risk.preprocess._call_preprocess_codegen_agent", fake_codegen_agent)
+
+    dataset_profile = {
+        "row_count": len(sample_frame),
+        "target_distribution": sample_frame["Credit_Score"].value_counts().to_dict(),
+        "missing_counts": sample_frame.isna().sum().to_dict(),
+    }
+    dataset_policy_spec = _sample_policy_spec()
+    column_transform_spec = _sample_column_transform_spec()
+
+    result = generate_preprocessing_code(
+        sample_frame,
+        dataset_profile,
+        dataset_policy_spec,
+        column_transform_spec,
+    )
+
+    assert result["code"] == "def run_preprocessing(df):\n    return df"
+    assert result["entrypoint"] == "run_preprocessing"
+    assert captured["system_prompt"] == "runtime system prompt"
+    assert captured["payload"]["dataset_profile"] == dataset_profile
+    assert captured["payload"]["dataset_policy_spec"] == dataset_policy_spec
+    assert captured["payload"]["column_transform_spec"] == column_transform_spec
+    assert captured["payload"]["columns"] == sample_frame.columns.tolist()
+    assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
 
 
 def _sample_policy_spec():

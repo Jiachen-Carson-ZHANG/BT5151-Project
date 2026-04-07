@@ -5,6 +5,7 @@ from sklearn.model_selection import GroupShuffleSplit
 
 from bt5151_credit_risk.config import GROUP_COLUMN, RANDOM_SEED, TARGET_COLUMN, TEST_SIZE
 from bt5151_credit_risk.llm import call_json_response
+from bt5151_credit_risk.skill_prompts import load_skill_prompt
 
 
 @dataclass
@@ -24,6 +25,10 @@ PLACEHOLDER_VALUES = {"_": pd.NA, "_______": pd.NA, "!@9#%8": pd.NA}
 
 
 def _call_preprocess_agent(system_prompt, payload):
+    return call_json_response(system_prompt, payload)
+
+
+def _call_preprocess_codegen_agent(system_prompt, payload):
     return call_json_response(system_prompt, payload)
 
 
@@ -53,6 +58,23 @@ def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict) 
         "dataset_policy_spec": dataset_policy_spec,
     }
     return _call_preprocess_agent(system_prompt, payload)
+
+
+def generate_preprocessing_code(
+    raw_df: pd.DataFrame,
+    dataset_profile: dict,
+    dataset_policy_spec: dict,
+    column_transform_spec: dict,
+) -> dict:
+    system_prompt = load_skill_prompt("generate-preprocessing-code")
+    payload = {
+        "columns": raw_df.columns.tolist(),
+        "sample_rows": raw_df.head(5).to_dict(orient="records"),
+        "dataset_profile": dataset_profile,
+        "dataset_policy_spec": dataset_policy_spec,
+        "column_transform_spec": column_transform_spec,
+    }
+    return _call_preprocess_codegen_agent(system_prompt, payload)
 
 
 def _default_dataset_policy_spec(df: pd.DataFrame) -> dict:
