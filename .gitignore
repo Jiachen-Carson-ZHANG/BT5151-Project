@@ -1,0 +1,12 @@
+.env
+.venv/
+.vscode/
+.pytest_cache/
+.ipynb_checkpoints/
+__pycache__/
+*.pyc
+
+credit_score_cleaned.csv
+credit_score_cleaned.xlsx
+credit_score_model_ready.csv
+credit_score_model_ready.xlsx

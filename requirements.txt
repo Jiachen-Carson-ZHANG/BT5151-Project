@@ -6,6 +6,7 @@ seaborn
 gradio
 langgraph
 pydantic
+python-dotenv
 openpyxl
 jupyter
 ipykernel
