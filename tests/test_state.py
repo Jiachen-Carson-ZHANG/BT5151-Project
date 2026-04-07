@@ -25,3 +25,7 @@ def test_dataset_profile_contains_core_fields(sample_frame):
 def test_state_has_expected_keys():
     state = CreditRiskState(raw_dataset_path="train.csv")
     assert state.raw_dataset_path == "train.csv"
+    assert state.dataset_policy_spec is None
+    assert state.column_transform_spec is None
+    assert state.preprocessing_execution_report is None
+    assert state.preprocessing_audit_report is None

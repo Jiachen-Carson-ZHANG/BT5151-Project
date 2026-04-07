@@ -2,6 +2,7 @@ import pandas as pd
 from langgraph.graph import StateGraph
 
 import bt5151_credit_risk.business as business
+import bt5151_credit_risk.preprocess as preprocess
 from bt5151_credit_risk.graph import build_graph
 from bt5151_credit_risk.graph import compile_graph
 
@@ -20,7 +21,10 @@ def test_graph_contains_required_nodes():
     graph = build_graph()
     assert isinstance(graph, StateGraph)
     expected_nodes = {
-        "preprocess-data",
+        "dataset-policy-spec",
+        "column-transform-spec",
+        "execute-preprocessing",
+        "audit-preprocessing",
         "train-models",
         "evaluate-models",
         "select-model",
@@ -49,7 +53,7 @@ def test_compiled_graph_runs_end_to_end(tmp_path, monkeypatch):
     dataset_path = tmp_path / "sample_credit.csv"
     sample_frame.to_csv(dataset_path, index=False)
 
-    def fake_agent(system_prompt, payload):
+    def fake_business_agent(system_prompt, payload):
         if "keys: action, reason" in system_prompt:
             return {
                 "action": "manual_review",
@@ -62,8 +66,33 @@ def test_compiled_graph_runs_end_to_end(tmp_path, monkeypatch):
             "summary": "Synthetic explanation for graph test.",
         }
 
-    monkeypatch.setattr("bt5151_credit_risk.graph.GroupShuffleSplit", _DeterministicSplitter)
-    monkeypatch.setattr(business, "_call_json_agent", fake_agent)
+    def fake_preprocess_agent(system_prompt, payload):
+        if "task_type, target_column, group_column" in system_prompt:
+            return {
+                "task_type": "multiclass_classification",
+                "target_column": "Credit_Score",
+                "group_column": "Customer_ID",
+                "identifier_columns": ["ID", "Name", "SSN"],
+                "split_strategy": {"type": "grouped_holdout", "test_size": 0.34},
+                "leakage_rules": {"drop_columns": ["ID", "Name", "SSN"]},
+                "imbalance_strategy": {"method": "none"},
+                "feature_policy": {"categorical_encoding": "one_hot"},
+            }
+        return {
+            "columns": {
+                "ID": {"action": "drop"},
+                "Customer_ID": {"action": "drop"},
+                "Name": {"action": "drop"},
+                "SSN": {"action": "drop"},
+                "Credit_Score": {"action": "drop"},
+                "Age": {"action": "keep", "imputation": "median"},
+                "Outstanding_Debt": {"action": "keep", "imputation": "median"},
+            }
+        }
+
+    monkeypatch.setattr(preprocess, "GroupShuffleSplit", _DeterministicSplitter)
+    monkeypatch.setattr(preprocess, "_call_preprocess_agent", fake_preprocess_agent)
+    monkeypatch.setattr(business, "_call_json_agent", fake_business_agent)
 
     graph = compile_graph()
     result = graph.invoke(
@@ -73,6 +102,8 @@ def test_compiled_graph_runs_end_to_end(tmp_path, monkeypatch):
         }
     )
 
+    assert result["dataset_policy_spec"]["target_column"] == "Credit_Score"
+    assert result["preprocessing_audit_report"]["passed"] is True
     assert result["selected_model_name"] in {"logistic_regression", "random_forest"}
     assert result["prediction_output"]["predicted_label"] in {"Good", "Standard", "Poor"}
     assert result["risk_explanation"]["summary"] == "Synthetic explanation for graph test."

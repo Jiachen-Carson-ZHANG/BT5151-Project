@@ -8,8 +8,15 @@ class CreditRiskState(BaseModel):
 
     raw_dataset_path: str
     dataset_profile: dict | None = None
+    dataset_policy_spec: dict | None = None
+    column_transform_spec: dict | None = None
     preprocessing_rules: dict | None = None
+    preprocessing_execution_report: dict | None = None
+    preprocessing_audit_report: dict | None = None
     feature_columns: list[str] | None = None
+    class_names: list[str] | None = None
+    label_to_id: dict | None = None
+    id_to_label: dict | None = None
     raw_frame: Any | None = None
     full_feature_frame: Any | None = None
     train_frame: Any | None = None

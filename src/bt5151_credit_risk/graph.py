@@ -1,45 +1,82 @@
 import pandas as pd
 from langgraph.graph import END, START, StateGraph
-from sklearn.model_selection import GroupShuffleSplit
 
 from bt5151_credit_risk.business import explain_risk, recommend_action
-from bt5151_credit_risk.config import GROUP_COLUMN, RANDOM_SEED, TEST_SIZE
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics
-from bt5151_credit_risk.preprocess import preprocess_credit_data
+from bt5151_credit_risk.preprocess import audit_preprocessing_output
+from bt5151_credit_risk.preprocess import execute_preprocessing
+from bt5151_credit_risk.preprocess import generate_column_transform_spec
+from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.profile import build_dataset_profile
 from bt5151_credit_risk.state import CreditRiskState
 from bt5151_credit_risk.train import build_candidate_models
 
-LABEL_TO_ID = {"Poor": 0, "Standard": 1, "Good": 2}
-ID_TO_LABEL = {value: key for key, value in LABEL_TO_ID.items()}
-CLASS_NAMES = ["Poor", "Standard", "Good"]
 
-
-def preprocess_data_node(state: CreditRiskState):
+def dataset_policy_spec_node(state: CreditRiskState):
     raw_frame = pd.read_csv(state.raw_dataset_path, low_memory=False)
     dataset_profile = build_dataset_profile(raw_frame)
-    preprocess_result = preprocess_credit_data(raw_frame)
-    feature_frame = preprocess_result.feature_frame.select_dtypes(include=["number"]).fillna(0)
-    target = preprocess_result.target.map(LABEL_TO_ID)
-
-    splitter = GroupShuffleSplit(n_splits=1, test_size=TEST_SIZE, random_state=RANDOM_SEED)
-    train_idx, test_idx = next(splitter.split(feature_frame, target, preprocess_result.groups))
+    dataset_policy_spec = generate_dataset_policy_spec(raw_frame, dataset_profile)
 
     return {
         "raw_frame": raw_frame,
         "dataset_profile": dataset_profile,
-        "preprocessing_rules": {
-            "numeric_only": True,
-            "fillna": 0,
-            "target_map": LABEL_TO_ID,
-        },
-        "feature_columns": feature_frame.columns.tolist(),
-        "full_feature_frame": feature_frame,
-        "train_frame": feature_frame.iloc[train_idx],
-        "test_frame": feature_frame.iloc[test_idx],
-        "train_target": target.iloc[train_idx],
-        "test_target": target.iloc[test_idx],
+        "dataset_policy_spec": dataset_policy_spec,
     }
+
+
+def column_transform_spec_node(state: CreditRiskState):
+    column_transform_spec = generate_column_transform_spec(
+        state.raw_frame,
+        state.dataset_policy_spec,
+    )
+    return {"column_transform_spec": column_transform_spec}
+
+
+def execute_preprocessing_node(state: CreditRiskState):
+    preprocess_result = execute_preprocessing(
+        state.raw_frame,
+        state.dataset_policy_spec,
+        state.column_transform_spec,
+    )
+    class_names = list(pd.Series(preprocess_result.target.dropna()).astype(str).unique())
+    label_to_id = {label: idx for idx, label in enumerate(class_names)}
+    id_to_label = {idx: label for label, idx in label_to_id.items()}
+    encoded_target = preprocess_result.target.map(label_to_id)
+    feature_frame = preprocess_result.feature_frame
+
+    return {
+        "preprocessing_rules": {
+            "dataset_policy_spec": state.dataset_policy_spec,
+            "column_transform_spec": state.column_transform_spec,
+        },
+        "preprocessing_execution_report": preprocess_result.execution_report,
+        "feature_columns": feature_frame.columns.tolist(),
+        "class_names": class_names,
+        "label_to_id": label_to_id,
+        "id_to_label": id_to_label,
+        "full_feature_frame": feature_frame,
+        "train_frame": feature_frame.iloc[preprocess_result.train_indices],
+        "test_frame": feature_frame.iloc[preprocess_result.test_indices],
+        "train_target": encoded_target.iloc[preprocess_result.train_indices],
+        "test_target": encoded_target.iloc[preprocess_result.test_indices],
+    }
+
+
+def audit_preprocessing_node(state: CreditRiskState):
+    preprocess_result = execute_preprocessing(
+        state.raw_frame,
+        state.dataset_policy_spec,
+        state.column_transform_spec,
+    )
+    audit_report = audit_preprocessing_output(
+        state.raw_frame,
+        preprocess_result,
+        state.dataset_policy_spec,
+        state.column_transform_spec,
+    )
+    if not audit_report["passed"]:
+        raise ValueError(f"Preprocessing audit failed: {audit_report}")
+    return {"preprocessing_audit_report": audit_report}
 
 
 def train_models_node(state: CreditRiskState):
@@ -64,7 +101,7 @@ def evaluate_models_node(state: CreditRiskState):
         results[model_name] = compute_multiclass_metrics(
             state.test_target,
             predictions,
-            CLASS_NAMES,
+            state.class_names,
         )
     return {"evaluation_results": results}
 
@@ -87,13 +124,13 @@ def run_inference_node(state: CreditRiskState):
     probabilities = model.predict_proba(input_frame)[0]
     predicted_code = int(model.predict(input_frame)[0])
     probability_map = {
-        ID_TO_LABEL[idx]: float(score)
+        state.id_to_label[idx]: float(score)
         for idx, score in enumerate(probabilities)
     }
     return {
         "prediction_output": {
             "row_index": row_index,
-            "predicted_label": ID_TO_LABEL[predicted_code],
+            "predicted_label": state.id_to_label[predicted_code],
             "probabilities": probability_map,
             "confidence": max(probability_map.values()),
             "selected_model_name": state.selected_model_name,
@@ -122,7 +159,10 @@ def recommend_action_node(state: CreditRiskState):
 
 def build_graph():
     graph = StateGraph(CreditRiskState)
-    graph.add_node("preprocess-data", preprocess_data_node)
+    graph.add_node("dataset-policy-spec", dataset_policy_spec_node)
+    graph.add_node("column-transform-spec", column_transform_spec_node)
+    graph.add_node("execute-preprocessing", execute_preprocessing_node)
+    graph.add_node("audit-preprocessing", audit_preprocessing_node)
     graph.add_node("train-models", train_models_node)
     graph.add_node("evaluate-models", evaluate_models_node)
     graph.add_node("select-model", select_model_node)
@@ -130,8 +170,11 @@ def build_graph():
     graph.add_node("explain-risk", explain_risk_node)
     graph.add_node("recommend-action", recommend_action_node)
 
-    graph.add_edge(START, "preprocess-data")
-    graph.add_edge("preprocess-data", "train-models")
+    graph.add_edge(START, "dataset-policy-spec")
+    graph.add_edge("dataset-policy-spec", "column-transform-spec")
+    graph.add_edge("column-transform-spec", "execute-preprocessing")
+    graph.add_edge("execute-preprocessing", "audit-preprocessing")
+    graph.add_edge("audit-preprocessing", "train-models")
     graph.add_edge("train-models", "evaluate-models")
     graph.add_edge("evaluate-models", "select-model")
     graph.add_edge("select-model", "run-inference")

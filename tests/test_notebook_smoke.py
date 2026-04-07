@@ -8,3 +8,4 @@ def test_notebook_exists():
 def test_notebook_uses_compiled_graph():
     notebook_text = Path("bt5151_credit_risk_pipeline.ipynb").read_text()
     assert "compile_graph" in notebook_text
+    assert "dataset-policy-spec" in notebook_text

@@ -43,20 +43,23 @@ PYTHONPATH=src pytest -v
 
 Current status:
 
-- `14` tests passing
+- `16` tests passing
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Raw Dataset] --> B[preprocess-data]
-    B --> C[train-models]
-    C --> D[evaluate-models]
-    D --> E[select-model]
-    E --> F[run-inference]
-    F --> G[explain-risk]
-    G --> H[recommend-action]
-    H --> I[Gradio UI]
+    A[Raw Dataset] --> B[dataset-policy-spec]
+    B --> C[column-transform-spec]
+    C --> D[execute-preprocessing]
+    D --> E[audit-preprocessing]
+    E --> F[train-models]
+    F --> G[evaluate-models]
+    G --> H[select-model]
+    H --> I[run-inference]
+    I --> J[explain-risk]
+    J --> K[recommend-action]
+    K --> L[Gradio UI]
 
     B --> S[(Agent State)]
     C --> S
@@ -65,17 +68,36 @@ flowchart LR
     F --> S
     G --> S
     H --> S
+    I --> S
+    J --> S
+    K --> S
 ```
 
 ## Current Node Responsibilities
 
-### `preprocess-data`
+### `dataset-policy-spec`
 
 - load dataset
 - build dataset profile
-- drop direct identifiers
-- produce grouped train/test split
-- prepare feature frame for downstream nodes
+- generate dataset-level preprocessing policy with the LLM
+- decide target, grouping, leakage, split, and imbalance strategy
+
+### `column-transform-spec`
+
+- generate per-column keep/drop, imputation, and encoding policy with the LLM
+
+### `execute-preprocessing`
+
+- deterministically apply the generated preprocessing specs
+- build feature frame
+- create grouped train/test split
+
+### `audit-preprocessing`
+
+- verify target exclusion
+- verify no group leakage
+- verify forbidden columns are removed
+- verify preprocessing output is usable
 
 ### `train-models`
 
@@ -111,13 +133,28 @@ flowchart LR
 
 This is the important part for the team.
 
-### `preprocess-data`
+### `dataset-policy-spec`
 
-- make cleaning more dataset-aware, not just placeholder replacement
-- parse messy numeric and categorical fields properly
-- persist preprocessing artifacts so inference uses the exact same transform path as training
-- support configurable schema instead of assuming only the current dataset columns
-- keep leakage control strict, especially for repeated entities like `Customer_ID`
+- improve schema inference across unfamiliar datasets
+- make split strategy and leakage policy reasoning stronger
+- keep the prompt compact while still producing a robust spec
+
+### `column-transform-spec`
+
+- improve column-level cleaning and imputation decisions
+- make feature engineering suggestions more useful without becoming overcomplicated
+- support richer typed transforms beyond the current minimal rules
+
+### `execute-preprocessing`
+
+- persist fitted preprocessing artifacts so inference uses the same transform path as training
+- support stronger numeric coercion, parsing, and reusable schema config
+
+### `audit-preprocessing`
+
+- add deeper leakage checks
+- add richer validation for schema drift and bad output columns
+- decide when audit should trigger a repair loop instead of a hard failure
 
 ### `train-models`
 
@@ -195,7 +232,7 @@ Practical goal:
 
 ## Immediate Roadmap
 
-1. Harden `preprocess-data` on the real dataset.
+1. Harden the preprocessing block on the real dataset.
 2. Produce final evaluation metrics and visualisations.
 3. Improve node prompts through fast trial and error with the API.
 4. Replace the row-index notebook demo with a more realistic input path.
