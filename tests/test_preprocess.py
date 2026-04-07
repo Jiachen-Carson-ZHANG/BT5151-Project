@@ -311,6 +311,38 @@ def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_
     assert "stderr" in execution_log
 
 
+def test_execute_generated_preprocessing_honors_declared_entrypoint(sample_frame, tmp_path):
+    generated_code = {
+        "code": (
+            "from pathlib import Path\n"
+            "import json\n"
+            "\n"
+            "def run_preprocessing(raw_df, workspace_path):\n"
+            "    raise AssertionError('wrong entrypoint was called')\n"
+            "\n"
+            "def custom_preprocessing(raw_df, workspace_path):\n"
+            "    workspace = Path(workspace_path)\n"
+            "    cleaned = raw_df.copy()\n"
+            "    feature_frame = cleaned.drop(columns=['Credit_Score'])\n"
+            "    target = cleaned['Credit_Score']\n"
+            "    cleaned.to_csv(workspace / 'cleaned_frame.csv', index=False)\n"
+            "    feature_frame.to_csv(workspace / 'feature_frame.csv', index=False)\n"
+            "    target.to_frame(name='Credit_Score').to_csv(workspace / 'target.csv', index=False)\n"
+            "    (workspace / 'split_manifest.json').write_text(json.dumps({'train_rows': 4, 'test_rows': 2}))\n"
+            "    (workspace / 'preprocessing_report.json').write_text(json.dumps({'status': 'ok', 'entrypoint': 'custom_preprocessing'}))\n"
+            "    return {'entrypoint': 'custom_preprocessing'}\n"
+        ),
+        "entrypoint": "custom_preprocessing",
+    }
+
+    result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+
+    assert result["execution_log"]["returncode"] == 0
+    assert "custom_preprocessing" in result["execution_log"]["stdout"]
+    assert Path(result["artifacts"]["cleaned_frame.csv"]).is_file()
+    assert Path(result["artifacts"]["preprocessing_report.json"]).is_file()
+
+
 def test_audit_preprocessing_output_reports_key_checks_passed(sample_frame):
     result = execute_preprocessing(
         sample_frame,

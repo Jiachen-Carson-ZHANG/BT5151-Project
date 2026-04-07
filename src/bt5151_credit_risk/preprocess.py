@@ -156,6 +156,7 @@ def execute_generated_preprocessing(
     generated_code: dict,
     run_root,
 ) -> dict:
+    entrypoint_name = generated_code.get("entrypoint", "run_preprocessing")
     run_root_path = Path(run_root)
     run_root_path.mkdir(parents=True, exist_ok=True)
 
@@ -183,12 +184,16 @@ def execute_generated_preprocessing(
                 "    code_path = Path(sys.argv[1])",
                 "    raw_frame_path = Path(sys.argv[2])",
                 "    workspace_path = Path(sys.argv[3])",
+                f"    entrypoint_name = {entrypoint_name!r}",
                 "    spec = importlib.util.spec_from_file_location(\"generated_preprocessing\", code_path)",
                 "    module = importlib.util.module_from_spec(spec)",
                 "    assert spec.loader is not None",
                 "    spec.loader.exec_module(module)",
+                "    entrypoint = getattr(module, entrypoint_name, None)",
+                "    if not callable(entrypoint):",
+                "        raise AttributeError(f\"Generated preprocessing entrypoint '{entrypoint_name}' was not found or is not callable.\")",
                 "    raw_df = pd.read_csv(raw_frame_path)",
-                "    result = module.run_preprocessing(raw_df, workspace_path)",
+                "    result = entrypoint(raw_df, workspace_path)",
                 "    if result is not None:",
                 "        print(json.dumps(result, default=str))",
                 "",
@@ -247,7 +252,7 @@ def execute_generated_preprocessing(
         "raw_frame_path": str(raw_frame_path),
         "code_path": str(code_path),
         "runner_path": str(runner_path),
-        "entrypoint": generated_code.get("entrypoint", "run_preprocessing"),
+        "entrypoint": entrypoint_name,
         "artifacts": artifacts,
         "missing_artifacts": missing_artifacts,
         "execution_log": execution_log,
