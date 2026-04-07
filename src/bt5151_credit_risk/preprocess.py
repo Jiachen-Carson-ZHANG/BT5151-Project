@@ -1,3 +1,4 @@
+import ast
 from dataclasses import dataclass
 
 import pandas as pd
@@ -75,6 +76,75 @@ def generate_preprocessing_code(
         "column_transform_spec": column_transform_spec,
     }
     return _call_preprocess_codegen_agent(system_prompt, payload)
+
+
+def inspect_preprocessing_code(generated_code: dict) -> dict:
+    code = generated_code.get("code", "")
+    entrypoint = generated_code.get("entrypoint")
+    issues: list[dict] = []
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return {
+            "passed": False,
+            "entrypoint": entrypoint,
+            "issues": [
+                {
+                    "rule": "syntax_error",
+                    "message": str(exc),
+                }
+            ],
+        }
+
+    defined_entrypoints = {
+        node.name for node in tree.body if isinstance(node, ast.FunctionDef)
+    }
+    if entrypoint not in defined_entrypoints:
+        issues.append(
+            {
+                "rule": "missing_entrypoint",
+                "message": f"Declared entrypoint '{entrypoint}' was not found as a function definition.",
+            }
+        )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "subprocess" or alias.name.startswith("subprocess."):
+                    issues.append(
+                        {
+                            "rule": "forbidden_import",
+                            "message": "Importing subprocess is not allowed in generated preprocessing code.",
+                        }
+                    )
+        elif isinstance(node, ast.ImportFrom):
+            if node.module == "subprocess" or (node.module or "").startswith("subprocess."):
+                issues.append(
+                    {
+                        "rule": "forbidden_import",
+                        "message": "Importing subprocess is not allowed in generated preprocessing code.",
+                    }
+                )
+        elif isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "os"
+                and node.func.attr == "system"
+            ):
+                issues.append(
+                    {
+                        "rule": "forbidden_call",
+                        "message": "Calling os.system is not allowed in generated preprocessing code.",
+                    }
+                )
+
+    return {
+        "passed": not issues,
+        "entrypoint": entrypoint,
+        "issues": issues,
+    }
 
 
 def _default_dataset_policy_spec(df: pd.DataFrame) -> dict:

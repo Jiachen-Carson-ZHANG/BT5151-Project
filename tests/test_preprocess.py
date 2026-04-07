@@ -6,6 +6,7 @@ from bt5151_credit_risk.preprocess import execute_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.preprocess import generate_preprocessing_code
+from bt5151_credit_risk.preprocess import inspect_preprocessing_code
 
 
 @pytest.fixture
@@ -170,6 +171,55 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
     assert captured["payload"]["column_transform_spec"] == column_transform_spec
     assert captured["payload"]["columns"] == sample_frame.columns.tolist()
     assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+
+
+def test_inspect_preprocessing_code_rejects_subprocess_import():
+    result = inspect_preprocessing_code(
+        {
+            "code": "import subprocess\n\ndef run_preprocessing(df):\n    return df",
+            "entrypoint": "run_preprocessing",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(issue["rule"] == "forbidden_import" for issue in result["issues"])
+
+
+def test_inspect_preprocessing_code_rejects_os_system_call():
+    result = inspect_preprocessing_code(
+        {
+            "code": "import os\n\ndef run_preprocessing(df):\n    os.system('echo unsafe')\n    return df",
+            "entrypoint": "run_preprocessing",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(issue["rule"] == "forbidden_call" for issue in result["issues"])
+
+
+def test_inspect_preprocessing_code_rejects_missing_entrypoint():
+    result = inspect_preprocessing_code(
+        {
+            "code": "def other_entrypoint(df):\n    return df",
+            "entrypoint": "run_preprocessing",
+        }
+    )
+
+    assert result["passed"] is False
+    assert any(issue["rule"] == "missing_entrypoint" for issue in result["issues"])
+
+
+def test_inspect_preprocessing_code_accepts_safe_entrypoint():
+    result = inspect_preprocessing_code(
+        {
+            "code": "def run_preprocessing(df):\n    return df.copy()",
+            "entrypoint": "run_preprocessing",
+        }
+    )
+
+    assert result["passed"] is True
+    assert result["entrypoint"] == "run_preprocessing"
+    assert result["issues"] == []
 
 
 def _sample_policy_spec():
