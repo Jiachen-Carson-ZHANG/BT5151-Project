@@ -36,4 +36,21 @@ def test_state_has_expected_keys():
     assert state.preprocessing_execution_report is None
     assert state.preprocessing_audit_report is None
     assert state.preprocessing_validation_report is None
-    assert state.preprocessing_attempt_count is None
+    assert state.preprocessing_attempt_count == 0
+
+
+def test_state_accepts_new_preprocessing_fields():
+    state = CreditRiskState(
+        raw_dataset_path="train.csv",
+        preprocessing_code={"code": "print('hello')"},
+        preprocessing_codegen_metadata={"model": "gpt-4o-mini"},
+        preprocessing_code_review={"passed": True},
+        preprocessing_workspace="/tmp/run-1",
+        preprocessing_artifacts={"feature_frame": "feature_frame.csv"},
+        preprocessing_execution_log={"stdout": "ok"},
+        preprocessing_validation_report={"passed": True},
+        preprocessing_attempt_count=2,
+    )
+
+    assert state.preprocessing_code == {"code": "print('hello')"}
+    assert state.preprocessing_attempt_count == 2

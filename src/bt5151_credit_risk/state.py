@@ -20,7 +20,7 @@ class CreditRiskState(BaseModel):
     preprocessing_execution_report: dict | None = None
     preprocessing_audit_report: dict | None = None
     preprocessing_validation_report: dict | None = None
-    preprocessing_attempt_count: int | None = None
+    preprocessing_attempt_count: int = 0
     feature_columns: list[str] | None = None
     class_names: list[str] | None = None
     label_to_id: dict | None = None
