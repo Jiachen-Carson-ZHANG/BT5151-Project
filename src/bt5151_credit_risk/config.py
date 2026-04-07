@@ -1,0 +1,4 @@
+RANDOM_SEED = 42
+TARGET_COLUMN = "Credit_Score"
+GROUP_COLUMN = "Customer_ID"
+TEST_SIZE = 0.2
