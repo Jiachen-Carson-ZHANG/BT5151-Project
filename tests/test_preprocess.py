@@ -87,7 +87,7 @@ def test_generate_dataset_policy_spec_uses_runtime_skill_prompt(sample_frame, mo
         assert skill_name == "dataset-policy-spec"
         return "runtime dataset policy prompt"
 
-    def fake_agent(system_prompt, payload):
+    def fake_agent(system_prompt, payload, **kwargs):
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
@@ -127,7 +127,7 @@ def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, 
         assert skill_name == "column-transform-spec"
         return "runtime column transform prompt"
 
-    def fake_agent(system_prompt, payload):
+    def fake_agent(system_prompt, payload, **kwargs):
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
@@ -166,7 +166,7 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
         assert skill_name == "generate-preprocessing-code"
         return "runtime system prompt"
 
-    def fake_codegen_agent(system_prompt, payload):
+    def fake_codegen_agent(system_prompt, payload, **kwargs):
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
@@ -209,7 +209,7 @@ def test_repair_preprocessing_code_uses_runtime_prompt_and_failure_context(sampl
         assert skill_name == "repair-preprocessing-code"
         return "runtime repair prompt"
 
-    def fake_codegen_agent(system_prompt, payload):
+    def fake_codegen_agent(system_prompt, payload, **kwargs):
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
@@ -317,6 +317,27 @@ def test_inspect_preprocessing_code_accepts_safe_entrypoint():
     assert result["passed"] is True
     assert result["entrypoint"] == "run_preprocessing"
     assert result["issues"] == []
+
+
+@pytest.mark.parametrize(
+    "code_snippet,expected_rule",
+    [
+        ("eval('1+1')\n\ndef run_preprocessing(df):\n    return df", "forbidden_call"),
+        ("exec('x=1')\n\ndef run_preprocessing(df):\n    return df", "forbidden_call"),
+        ("__import__('os')\n\ndef run_preprocessing(df):\n    return df", "forbidden_call"),
+        ("import socket\n\ndef run_preprocessing(df):\n    return df", "forbidden_import"),
+        ("from urllib import request\n\ndef run_preprocessing(df):\n    return df", "forbidden_import"),
+        ("import os\n\ndef run_preprocessing(df):\n    os.popen('ls')\n    return df", "forbidden_call"),
+        ("import importlib\n\ndef run_preprocessing(df):\n    importlib.import_module('subprocess')\n    return df", "forbidden_call"),
+    ],
+    ids=["eval", "exec", "__import__", "socket", "urllib", "os.popen", "importlib.import_module"],
+)
+def test_inspect_preprocessing_code_rejects_additional_forbidden_patterns(code_snippet, expected_rule):
+    result = inspect_preprocessing_code(
+        {"code": code_snippet, "entrypoint": "run_preprocessing"}
+    )
+    assert result["passed"] is False
+    assert any(issue["rule"] == expected_rule for issue in result["issues"])
 
 
 def _sample_policy_spec():

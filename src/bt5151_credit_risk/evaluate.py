@@ -1,6 +1,7 @@
 from sklearn.metrics import classification_report, f1_score
 
 
+# Compute the core multi-class metrics used for model comparison.
 def compute_multiclass_metrics(y_true, y_pred, class_names):
     label_indices = list(range(len(class_names)))
     report = classification_report(
@@ -18,6 +19,7 @@ def compute_multiclass_metrics(y_true, y_pred, class_names):
     }
 
 
+# Pick the winning model from the evaluation summary.
 def choose_best_model(results):
     model_name = max(
         results,

@@ -1,6 +1,7 @@
 from pathlib import Path
 
 
+# Load one skill file safely and block path tricks like ../ or absolute paths.
 def load_skill_prompt(skill_name: str) -> str:
     skill_name_path = Path(skill_name)
     if skill_name_path.is_absolute() or len(skill_name_path.parts) != 1:

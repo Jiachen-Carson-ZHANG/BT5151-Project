@@ -1,5 +1,6 @@
 import ast
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -12,14 +13,15 @@ from bt5151_credit_risk.llm import call_json_response
 from bt5151_credit_risk.skill_prompts import load_skill_prompt
 
 
-def _call_preprocess_agent(system_prompt, payload):
-    return call_json_response(system_prompt, payload)
+def _call_preprocess_agent(system_prompt, payload, caller="preprocess"):
+    return call_json_response(system_prompt, payload, caller=caller)
 
 
-def _call_preprocess_codegen_agent(system_prompt, payload):
-    return call_json_response(system_prompt, payload)
+def _call_preprocess_codegen_agent(system_prompt, payload, caller="preprocess-codegen"):
+    return call_json_response(system_prompt, payload, caller=caller)
 
 
+# Ask the LLM for dataset-level preprocessing decisions.
 def generate_dataset_policy_spec(df: pd.DataFrame, dataset_profile: dict) -> dict:
     system_prompt = load_skill_prompt("dataset-policy-spec")
     payload = {
@@ -27,9 +29,10 @@ def generate_dataset_policy_spec(df: pd.DataFrame, dataset_profile: dict) -> dic
         "sample_rows": df.head(5).to_dict(orient="records"),
         "dataset_profile": dataset_profile,
     }
-    return _call_preprocess_agent(system_prompt, payload)
+    return _call_preprocess_agent(system_prompt, payload, caller="dataset-policy-spec")
 
 
+# Ask the LLM for column-by-column transformation rules.
 def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict) -> dict:
     system_prompt = load_skill_prompt("column-transform-spec")
     payload = {
@@ -37,9 +40,10 @@ def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict) 
         "sample_rows": df.head(5).to_dict(orient="records"),
         "dataset_policy_spec": dataset_policy_spec,
     }
-    return _call_preprocess_agent(system_prompt, payload)
+    return _call_preprocess_agent(system_prompt, payload, caller="column-transform-spec")
 
 
+# Ask the LLM to write the preprocessing code itself.
 def generate_preprocessing_code(
     raw_df: pd.DataFrame,
     dataset_profile: dict,
@@ -54,9 +58,10 @@ def generate_preprocessing_code(
         "dataset_policy_spec": dataset_policy_spec,
         "column_transform_spec": column_transform_spec,
     }
-    return _call_preprocess_codegen_agent(system_prompt, payload)
+    return _call_preprocess_codegen_agent(system_prompt, payload, caller="generate-preprocessing-code")
 
 
+# Ask the LLM to fix the last preprocessing attempt using failure feedback.
 def repair_preprocessing_code(
     *,
     previous_generated_code: dict,
@@ -77,9 +82,10 @@ def repair_preprocessing_code(
         "dataset_policy_spec": dataset_policy_spec,
         "column_transform_spec": column_transform_spec,
     }
-    return _call_preprocess_codegen_agent(system_prompt, payload)
+    return _call_preprocess_codegen_agent(system_prompt, payload, caller="repair-preprocessing-code")
 
 
+# Reject obviously unsafe or incomplete generated code before execution.
 def inspect_preprocessing_code(generated_code: dict) -> dict:
     code = generated_code.get("code", "")
     entrypoint = generated_code.get("entrypoint")
@@ -110,35 +116,62 @@ def inspect_preprocessing_code(generated_code: dict) -> dict:
             }
         )
 
+    # This is a lightweight denylist check, not a full sandbox.
+    FORBIDDEN_MODULES = {"subprocess", "socket", "http", "urllib", "ftplib", "smtplib", "ctypes", "multiprocessing"}
+    FORBIDDEN_OS_ATTRS = {"system", "popen", "exec", "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe", "spawn", "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"}
+    FORBIDDEN_BUILTINS = {"eval", "exec", "__import__", "compile", "breakpoint"}
+
+    # Walk the AST so we can catch unsafe patterns before running the generated file.
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name == "subprocess" or alias.name.startswith("subprocess."):
+                module_root = alias.name.split(".")[0]
+                if module_root in FORBIDDEN_MODULES:
                     issues.append(
                         {
                             "rule": "forbidden_import",
-                            "message": "Importing subprocess is not allowed in generated preprocessing code.",
+                            "message": f"Importing {alias.name} is not allowed in generated preprocessing code.",
                         }
                     )
         elif isinstance(node, ast.ImportFrom):
-            if node.module == "subprocess" or (node.module or "").startswith("subprocess."):
+            module_root = (node.module or "").split(".")[0]
+            if module_root in FORBIDDEN_MODULES:
                 issues.append(
                     {
                         "rule": "forbidden_import",
-                        "message": "Importing subprocess is not allowed in generated preprocessing code.",
+                        "message": f"Importing from {node.module} is not allowed in generated preprocessing code.",
                     }
                 )
         elif isinstance(node, ast.Call):
-            if (
+            if isinstance(node.func, ast.Name) and node.func.id in FORBIDDEN_BUILTINS:
+                issues.append(
+                    {
+                        "rule": "forbidden_call",
+                        "message": f"Calling {node.func.id}() is not allowed in generated preprocessing code.",
+                    }
+                )
+            elif (
                 isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id == "os"
-                and node.func.attr == "system"
+                and node.func.attr in FORBIDDEN_OS_ATTRS
             ):
                 issues.append(
                     {
                         "rule": "forbidden_call",
-                        "message": "Calling os.system is not allowed in generated preprocessing code.",
+                        "message": f"Calling os.{node.func.attr}() is not allowed in generated preprocessing code.",
+                    }
+                )
+            elif (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "importlib"
+                and node.func.attr == "import_module"
+            ):
+                issues.append(
+                    {
+                        "rule": "forbidden_call",
+                        "message": "Calling importlib.import_module() is not allowed in generated preprocessing code.",
                     }
                 )
 
@@ -149,6 +182,19 @@ def inspect_preprocessing_code(generated_code: dict) -> dict:
     }
 
 
+# Delete older run folders so generated workspaces do not pile up forever.
+def cleanup_old_workspaces(run_root_path: Path, keep_latest: int = 1) -> None:
+    if not run_root_path.is_dir():
+        return
+    workspaces = sorted(
+        [d for d in run_root_path.iterdir() if d.is_dir() and d.name.startswith("generated_preprocessing_")],
+        key=lambda d: d.stat().st_mtime,
+    )
+    for workspace in workspaces[:-keep_latest] if keep_latest else workspaces:
+        shutil.rmtree(workspace, ignore_errors=True)
+
+
+# Run the generated preprocessing code in its own workspace and collect artifacts.
 def execute_generated_preprocessing(
     raw_df: pd.DataFrame,
     generated_code: dict,
@@ -167,6 +213,7 @@ def execute_generated_preprocessing(
 
     raw_df.to_csv(raw_frame_path, index=False)
     code_path.write_text(generated_code.get("code", ""), encoding="utf-8")
+    # Run the generated file in a fresh Python process so failures stay isolated from the graph process.
     runner_path.write_text(
         "\n".join(
             [
@@ -230,6 +277,7 @@ def execute_generated_preprocessing(
             "timeout_seconds": timeout_seconds,
         }
 
+    # A run is only considered usable if both the process succeeded and every required file exists.
     required_artifacts = [
         "cleaned_frame.csv",
         "feature_frame.csv",
@@ -260,6 +308,7 @@ def execute_generated_preprocessing(
     }
 
 
+# Check that generated artifacts are usable and do not violate split or leakage rules.
 def validate_preprocessing_output(
     execution_result: dict,
     dataset_policy_spec: dict,
@@ -345,6 +394,7 @@ def validate_preprocessing_output(
         group_overlap_zero = False
         if split_manifest_path.is_file() and raw_frame_path.is_file():
             try:
+                # Validate group leakage from the raw data and saved indices instead of trusting generated summaries.
                 manifest = json.loads(split_manifest_path.read_text(encoding="utf-8"))
                 train_indices = manifest["train_indices"]
                 test_indices = manifest["test_indices"]

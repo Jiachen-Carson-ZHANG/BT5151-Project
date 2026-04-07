@@ -187,9 +187,9 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     assert result["train_frame"].shape[0] > 0
     assert result["test_frame"].shape[0] > 0
     assert result["feature_columns"] == ["Age", "Outstanding_Debt"]
-    assert result["class_names"] == ["Good", "Standard", "Poor"]
-    assert result["label_to_id"] == {"Good": 0, "Standard": 1, "Poor": 2}
-    assert result["id_to_label"] == {0: "Good", 1: "Standard", 2: "Poor"}
+    assert result["class_names"] == ["Good", "Poor", "Standard"]
+    assert result["label_to_id"] == {"Good": 0, "Poor": 1, "Standard": 2}
+    assert result["id_to_label"] == {0: "Good", 1: "Poor", 2: "Standard"}
     assert result["selected_model_name"] in {"logistic_regression", "random_forest"}
     assert result["prediction_output"]["predicted_label"] in {"Good", "Standard", "Poor"}
     assert result["risk_explanation"]["summary"] == "Synthetic explanation for graph test."

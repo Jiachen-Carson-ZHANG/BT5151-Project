@@ -15,6 +15,7 @@ class CreditRiskState(BaseModel):
     preprocessing_code_review: dict | None = None
     preprocessing_rules: dict | None = None
     preprocessing_workspace: str | None = None
+    preprocessing_raw_frame_path: str | None = None
     preprocessing_artifacts: dict | None = None
     preprocessing_execution_log: dict | None = None
     preprocessing_execution_report: dict | None = None

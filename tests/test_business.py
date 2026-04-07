@@ -2,7 +2,7 @@ import bt5151_credit_risk.business as business
 
 
 def test_explain_risk_returns_business_language(monkeypatch):
-    def fake_call_json_agent(system_prompt, payload):
+    def fake_call_json_agent(system_prompt, payload, **kwargs):
         assert payload["predicted_label"] == "Poor"
         return {
             "predicted_label": "Poor",
@@ -22,7 +22,7 @@ def test_explain_risk_returns_business_language(monkeypatch):
 
 
 def test_recommend_action_escalates_high_risk(monkeypatch):
-    def fake_call_json_agent(system_prompt, payload):
+    def fake_call_json_agent(system_prompt, payload, **kwargs):
         assert payload["risk_explanation"]["risk_level"] == "high"
         return {
             "action": "manual_review",

@@ -1,10 +1,11 @@
 from bt5151_credit_risk.llm import call_json_response
 
 
-def _call_json_agent(system_prompt, payload):
-    return call_json_response(system_prompt, payload)
+def _call_json_agent(system_prompt, payload, caller="business"):
+    return call_json_response(system_prompt, payload, caller=caller)
 
 
+# Turn the model prediction into a short business-friendly explanation.
 def explain_risk(
     predicted_label,
     probabilities,
@@ -27,9 +28,10 @@ def explain_risk(
         "evaluation_metrics": evaluation_metrics,
         "source_record": source_record,
     }
-    return _call_json_agent(system_prompt, payload)
+    return _call_json_agent(system_prompt, payload, caller="explain-risk")
 
 
+# Turn the explanation into a suggested next action.
 def recommend_action(risk_explanation, prediction_output=None):
     system_prompt = (
         "You are a credit operations specialist. "
@@ -41,4 +43,4 @@ def recommend_action(risk_explanation, prediction_output=None):
         "risk_explanation": risk_explanation,
         "prediction_output": prediction_output,
     }
-    return _call_json_agent(system_prompt, payload)
+    return _call_json_agent(system_prompt, payload, caller="recommend-action")

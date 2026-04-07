@@ -5,8 +5,13 @@
 .ipynb_checkpoints/
 __pycache__/
 *.pyc
+.claude/
+AGENTS.md
+docs/
 
+train.csv
 credit_score_cleaned.csv
 credit_score_cleaned.xlsx
 credit_score_model_ready.csv
 credit_score_model_ready.xlsx
+generated_preprocessing_runs/
