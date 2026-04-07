@@ -1,34 +1,44 @@
-def explain_risk(predicted_label, probabilities):
-    confidence = max(probabilities.values())
-    if confidence >= 0.75:
-        confidence_band = "high"
-    elif confidence >= 0.55:
-        confidence_band = "medium"
-    else:
-        confidence_band = "low"
+from bt5151_credit_risk.llm import call_json_response
 
-    risk_level = {"Good": "low", "Standard": "moderate", "Poor": "high"}[predicted_label]
 
-    return {
+def _call_json_agent(system_prompt, payload):
+    return call_json_response(system_prompt, payload)
+
+
+def explain_risk(
+    predicted_label,
+    probabilities,
+    selected_model_name=None,
+    evaluation_metrics=None,
+    source_record=None,
+):
+    system_prompt = (
+        "You are a credit risk analyst. "
+        "Return only valid JSON with keys: "
+        "predicted_label, risk_level, confidence_band, summary. "
+        "Use risk_level values low, moderate, or high. "
+        "Use confidence_band values low, medium, or high. "
+        "Write the summary for a non-technical business user."
+    )
+    payload = {
         "predicted_label": predicted_label,
-        "risk_level": risk_level,
-        "confidence_band": confidence_band,
-        "summary": f"Customer is assessed as {risk_level} risk with {confidence_band} confidence.",
+        "probabilities": probabilities,
+        "selected_model_name": selected_model_name,
+        "evaluation_metrics": evaluation_metrics,
+        "source_record": source_record,
     }
+    return _call_json_agent(system_prompt, payload)
 
 
-def recommend_action(explanation):
-    if explanation["risk_level"] == "high":
-        return {
-            "action": "manual_review",
-            "reason": "Escalate due to likely poor credit standing.",
-        }
-    if explanation["risk_level"] == "moderate":
-        return {
-            "action": "monitor_account",
-            "reason": "Review recent behavior and monitor next cycle.",
-        }
-    return {
-        "action": "standard_handling",
-        "reason": "Continue standard treatment.",
+def recommend_action(risk_explanation, prediction_output=None):
+    system_prompt = (
+        "You are a credit operations specialist. "
+        "Return only valid JSON with keys: action, reason. "
+        "Choose a concise action code such as manual_review, monitor_account, or standard_handling. "
+        "Write the reason for a non-technical business user."
+    )
+    payload = {
+        "risk_explanation": risk_explanation,
+        "prediction_output": prediction_output,
     }
+    return _call_json_agent(system_prompt, payload)

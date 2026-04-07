@@ -1,11 +1,27 @@
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 
 class CreditRiskState(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     raw_dataset_path: str
     dataset_profile: dict | None = None
     preprocessing_rules: dict | None = None
+    feature_columns: list[str] | None = None
+    raw_frame: Any | None = None
+    full_feature_frame: Any | None = None
+    train_frame: Any | None = None
+    test_frame: Any | None = None
+    train_target: Any | None = None
+    test_target: Any | None = None
+    candidate_model_specs: dict | None = None
+    trained_models: dict | None = None
     evaluation_results: dict | None = None
+    selected_model_name: str | None = None
+    selection_justification: str | None = None
+    inference_input: dict | None = None
     prediction_output: dict | None = None
     risk_explanation: dict | None = None
     recommended_action: dict | None = None
