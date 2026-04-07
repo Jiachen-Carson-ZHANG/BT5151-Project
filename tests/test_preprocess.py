@@ -82,8 +82,16 @@ def sample_frame():
     )
 
 
-def test_generate_dataset_policy_spec_returns_structured_policy(sample_frame, monkeypatch):
+def test_generate_dataset_policy_spec_uses_runtime_skill_prompt(sample_frame, monkeypatch):
+    captured = {}
+
+    def fake_load_skill_prompt(skill_name):
+        assert skill_name == "dataset-policy-spec"
+        return "runtime dataset policy prompt"
+
     def fake_agent(system_prompt, payload):
+        captured["system_prompt"] = system_prompt
+        captured["payload"] = payload
         return {
             "task_type": "multiclass_classification",
             "target_column": "Credit_Score",
@@ -95,6 +103,7 @@ def test_generate_dataset_policy_spec_returns_structured_policy(sample_frame, mo
             "feature_policy": {"categorical_encoding": "one_hot"},
         }
 
+    monkeypatch.setattr("bt5151_credit_risk.preprocess.load_skill_prompt", fake_load_skill_prompt)
     monkeypatch.setattr("bt5151_credit_risk.preprocess._call_preprocess_agent", fake_agent)
     profile = {
         "row_count": len(sample_frame),
@@ -104,13 +113,25 @@ def test_generate_dataset_policy_spec_returns_structured_policy(sample_frame, mo
 
     policy = generate_dataset_policy_spec(sample_frame, profile)
 
+    assert captured["system_prompt"] == "runtime dataset policy prompt"
+    assert captured["payload"]["columns"] == sample_frame.columns.tolist()
+    assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+    assert captured["payload"]["dataset_profile"] == profile
     assert policy["target_column"] == "Credit_Score"
     assert policy["group_column"] == "Customer_ID"
     assert policy["split_strategy"]["type"] == "grouped_holdout"
 
 
-def test_generate_column_transform_spec_returns_column_rules(sample_frame, monkeypatch):
+def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, monkeypatch):
+    captured = {}
+
+    def fake_load_skill_prompt(skill_name):
+        assert skill_name == "column-transform-spec"
+        return "runtime column transform prompt"
+
     def fake_agent(system_prompt, payload):
+        captured["system_prompt"] = system_prompt
+        captured["payload"] = payload
         return {
             "columns": {
                 "Age": {"action": "keep", "imputation": "median"},
@@ -122,6 +143,7 @@ def test_generate_column_transform_spec_returns_column_rules(sample_frame, monke
             }
         }
 
+    monkeypatch.setattr("bt5151_credit_risk.preprocess.load_skill_prompt", fake_load_skill_prompt)
     monkeypatch.setattr("bt5151_credit_risk.preprocess._call_preprocess_agent", fake_agent)
     policy = {
         "target_column": "Credit_Score",
@@ -131,6 +153,10 @@ def test_generate_column_transform_spec_returns_column_rules(sample_frame, monke
 
     spec = generate_column_transform_spec(sample_frame, policy)
 
+    assert captured["system_prompt"] == "runtime column transform prompt"
+    assert captured["payload"]["columns"] == sample_frame.columns.tolist()
+    assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+    assert captured["payload"]["dataset_policy_spec"] == policy
     assert spec["columns"]["Age"]["imputation"] == "median"
     assert spec["columns"]["Occupation"]["encoding"] == "one_hot"
 

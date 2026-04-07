@@ -39,11 +39,7 @@ def _call_preprocess_codegen_agent(system_prompt, payload):
 
 
 def generate_dataset_policy_spec(df: pd.DataFrame, dataset_profile: dict) -> dict:
-    system_prompt = (
-        "You design preprocessing policy for labeled tabular machine learning. "
-        "Return only valid JSON with keys: task_type, target_column, group_column, "
-        "identifier_columns, split_strategy, leakage_rules, imbalance_strategy, feature_policy."
-    )
+    system_prompt = load_skill_prompt("dataset-policy-spec")
     payload = {
         "columns": df.columns.tolist(),
         "sample_rows": df.head(5).to_dict(orient="records"),
@@ -53,11 +49,7 @@ def generate_dataset_policy_spec(df: pd.DataFrame, dataset_profile: dict) -> dic
 
 
 def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict) -> dict:
-    system_prompt = (
-        "You design per-column transformations for labeled tabular machine learning. "
-        "Return only valid JSON with key 'columns'. "
-        "Each column rule should include an action and optional imputation, encoding, or fill_value."
-    )
+    system_prompt = load_skill_prompt("column-transform-spec")
     payload = {
         "columns": df.columns.tolist(),
         "sample_rows": df.head(5).to_dict(orient="records"),

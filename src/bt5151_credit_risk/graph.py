@@ -1,15 +1,24 @@
+import json
+from pathlib import Path
+
 import pandas as pd
 from langgraph.graph import END, START, StateGraph
 
 from bt5151_credit_risk.business import explain_risk, recommend_action
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics
-from bt5151_credit_risk.preprocess import audit_preprocessing_output
-from bt5151_credit_risk.preprocess import execute_preprocessing
+from bt5151_credit_risk.preprocess import execute_generated_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
+from bt5151_credit_risk.preprocess import generate_preprocessing_code
+from bt5151_credit_risk.preprocess import inspect_preprocessing_code
+from bt5151_credit_risk.preprocess import repair_preprocessing_code
+from bt5151_credit_risk.preprocess import validate_preprocessing_output
 from bt5151_credit_risk.profile import build_dataset_profile
 from bt5151_credit_risk.state import CreditRiskState
 from bt5151_credit_risk.train import build_candidate_models
+
+
+MAX_REPAIR_ATTEMPTS = 3
 
 
 def dataset_policy_spec_node(state: CreditRiskState):
@@ -32,51 +41,107 @@ def column_transform_spec_node(state: CreditRiskState):
     return {"column_transform_spec": column_transform_spec}
 
 
-def execute_preprocessing_node(state: CreditRiskState):
-    preprocess_result = execute_preprocessing(
+def generate_preprocessing_code_node(state: CreditRiskState):
+    generated_code = generate_preprocessing_code(
         state.raw_frame,
+        state.dataset_profile,
         state.dataset_policy_spec,
         state.column_transform_spec,
     )
-    class_names = list(pd.Series(preprocess_result.target.dropna()).astype(str).unique())
+    return {
+        "preprocessing_code": generated_code,
+        "preprocessing_codegen_metadata": {
+            "entrypoint": generated_code.get("entrypoint"),
+        },
+    }
+
+
+def inspect_preprocessing_code_node(state: CreditRiskState):
+    code_review = inspect_preprocessing_code(state.preprocessing_code or {})
+    return {
+        "preprocessing_code_review": code_review,
+    }
+
+
+def execute_generated_preprocessing_node(state: CreditRiskState):
+    run_root = Path(state.raw_dataset_path).resolve().parent / "generated_preprocessing_runs"
+    execution_result = execute_generated_preprocessing(
+        state.raw_frame,
+        state.preprocessing_code,
+        run_root,
+    )
+    return {
+        "preprocessing_workspace": execution_result["workspace_path"],
+        "preprocessing_artifacts": execution_result["artifacts"],
+        "preprocessing_execution_log": execution_result["execution_log"],
+        "preprocessing_execution_report": execution_result,
+    }
+
+
+def validate_preprocessing_output_node(state: CreditRiskState):
+    execution_result = {
+        "workspace_path": state.preprocessing_workspace,
+        "artifacts": state.preprocessing_artifacts,
+        "execution_log": state.preprocessing_execution_log or {},
+    }
+    validation_report = validate_preprocessing_output(
+        execution_result,
+        state.dataset_policy_spec,
+        state.column_transform_spec,
+    )
+    if not validation_report["passed"]:
+        return {"preprocessing_validation_report": validation_report}
+
+    artifacts = state.preprocessing_artifacts or {}
+    feature_frame = pd.read_csv(artifacts["feature_frame.csv"])
+    target_frame = pd.read_csv(artifacts["target.csv"])
+    target_series = target_frame.iloc[:, 0]
+
+    class_names = list(pd.Series(target_series.dropna()).astype(str).unique())
     label_to_id = {label: idx for idx, label in enumerate(class_names)}
     id_to_label = {idx: label for label, idx in label_to_id.items()}
-    encoded_target = preprocess_result.target.map(label_to_id)
-    feature_frame = preprocess_result.feature_frame
+    encoded_target = target_series.astype(str).map(label_to_id)
+    split_manifest = json.loads(Path(artifacts["split_manifest.json"]).read_text(encoding="utf-8"))
+    train_indices = split_manifest["train_indices"]
+    test_indices = split_manifest["test_indices"]
 
     return {
-        "preprocessing_rules": {
-            "dataset_policy_spec": state.dataset_policy_spec,
-            "column_transform_spec": state.column_transform_spec,
-        },
-        "preprocessing_execution_report": preprocess_result.execution_report,
+        "preprocessing_validation_report": validation_report,
+        "full_feature_frame": feature_frame,
+        "train_frame": feature_frame.iloc[train_indices],
+        "test_frame": feature_frame.iloc[test_indices],
+        "train_target": encoded_target.iloc[train_indices],
+        "test_target": encoded_target.iloc[test_indices],
         "feature_columns": feature_frame.columns.tolist(),
         "class_names": class_names,
         "label_to_id": label_to_id,
         "id_to_label": id_to_label,
-        "full_feature_frame": feature_frame,
-        "train_frame": feature_frame.iloc[preprocess_result.train_indices],
-        "test_frame": feature_frame.iloc[preprocess_result.test_indices],
-        "train_target": encoded_target.iloc[preprocess_result.train_indices],
-        "test_target": encoded_target.iloc[preprocess_result.test_indices],
     }
 
 
-def audit_preprocessing_node(state: CreditRiskState):
-    preprocess_result = execute_preprocessing(
-        state.raw_frame,
-        state.dataset_policy_spec,
-        state.column_transform_spec,
+def repair_preprocessing_code_node(state: CreditRiskState):
+    attempt_count = state.preprocessing_attempt_count or 0
+    if attempt_count >= MAX_REPAIR_ATTEMPTS:
+        raise RuntimeError(
+            f"Preprocessing repair failed after {attempt_count} attempts."
+        )
+
+    repaired_code = repair_preprocessing_code(
+        previous_generated_code=state.preprocessing_code,
+        code_review=state.preprocessing_code_review or {},
+        execution_log=state.preprocessing_execution_log or {},
+        validation_report=state.preprocessing_validation_report or {},
+        dataset_profile=state.dataset_profile,
+        dataset_policy_spec=state.dataset_policy_spec,
+        column_transform_spec=state.column_transform_spec,
     )
-    audit_report = audit_preprocessing_output(
-        state.raw_frame,
-        preprocess_result,
-        state.dataset_policy_spec,
-        state.column_transform_spec,
-    )
-    if not audit_report["passed"]:
-        raise ValueError(f"Preprocessing audit failed: {audit_report}")
-    return {"preprocessing_audit_report": audit_report}
+    return {
+        "preprocessing_code": repaired_code,
+        "preprocessing_codegen_metadata": {
+            "entrypoint": repaired_code.get("entrypoint"),
+        },
+        "preprocessing_attempt_count": attempt_count + 1,
+    }
 
 
 def train_models_node(state: CreditRiskState):
@@ -157,12 +222,27 @@ def recommend_action_node(state: CreditRiskState):
     return {"recommended_action": action}
 
 
+def _route_after_inspection(state: CreditRiskState):
+    if state.preprocessing_code_review and state.preprocessing_code_review.get("passed"):
+        return "execute-generated-preprocessing"
+    return "repair-preprocessing-code"
+
+
+def _route_after_validation(state: CreditRiskState):
+    if state.preprocessing_validation_report and state.preprocessing_validation_report.get("passed"):
+        return "train-models"
+    return "repair-preprocessing-code"
+
+
 def build_graph():
     graph = StateGraph(CreditRiskState)
     graph.add_node("dataset-policy-spec", dataset_policy_spec_node)
     graph.add_node("column-transform-spec", column_transform_spec_node)
-    graph.add_node("execute-preprocessing", execute_preprocessing_node)
-    graph.add_node("audit-preprocessing", audit_preprocessing_node)
+    graph.add_node("generate-preprocessing-code", generate_preprocessing_code_node)
+    graph.add_node("inspect-preprocessing-code", inspect_preprocessing_code_node)
+    graph.add_node("execute-generated-preprocessing", execute_generated_preprocessing_node)
+    graph.add_node("validate-preprocessing-output", validate_preprocessing_output_node)
+    graph.add_node("repair-preprocessing-code", repair_preprocessing_code_node)
     graph.add_node("train-models", train_models_node)
     graph.add_node("evaluate-models", evaluate_models_node)
     graph.add_node("select-model", select_model_node)
@@ -172,9 +252,26 @@ def build_graph():
 
     graph.add_edge(START, "dataset-policy-spec")
     graph.add_edge("dataset-policy-spec", "column-transform-spec")
-    graph.add_edge("column-transform-spec", "execute-preprocessing")
-    graph.add_edge("execute-preprocessing", "audit-preprocessing")
-    graph.add_edge("audit-preprocessing", "train-models")
+    graph.add_edge("column-transform-spec", "generate-preprocessing-code")
+    graph.add_edge("generate-preprocessing-code", "inspect-preprocessing-code")
+    graph.add_conditional_edges(
+        "inspect-preprocessing-code",
+        _route_after_inspection,
+        {
+            "execute-generated-preprocessing": "execute-generated-preprocessing",
+            "repair-preprocessing-code": "repair-preprocessing-code",
+        },
+    )
+    graph.add_edge("execute-generated-preprocessing", "validate-preprocessing-output")
+    graph.add_conditional_edges(
+        "validate-preprocessing-output",
+        _route_after_validation,
+        {
+            "train-models": "train-models",
+            "repair-preprocessing-code": "repair-preprocessing-code",
+        },
+    )
+    graph.add_edge("repair-preprocessing-code", "inspect-preprocessing-code")
     graph.add_edge("train-models", "evaluate-models")
     graph.add_edge("evaluate-models", "select-model")
     graph.add_edge("select-model", "run-inference")
