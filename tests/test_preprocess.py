@@ -10,6 +10,7 @@ from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.preprocess import generate_preprocessing_code
 from bt5151_credit_risk.preprocess import inspect_preprocessing_code
+from bt5151_credit_risk.preprocess import repair_preprocessing_code
 from bt5151_credit_risk.preprocess import validate_preprocessing_output
 
 
@@ -175,6 +176,74 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
     assert captured["payload"]["column_transform_spec"] == column_transform_spec
     assert captured["payload"]["columns"] == sample_frame.columns.tolist()
     assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+
+
+def test_repair_preprocessing_code_uses_runtime_prompt_and_failure_context(sample_frame, monkeypatch):
+    captured = {}
+
+    def fake_load_skill_prompt(skill_name):
+        assert skill_name == "repair-preprocessing-code"
+        return "runtime repair prompt"
+
+    def fake_codegen_agent(system_prompt, payload):
+        captured["system_prompt"] = system_prompt
+        captured["payload"] = payload
+        return {
+            "code": "def run_preprocessing(raw_df, workspace_path):\n    return raw_df",
+            "entrypoint": "run_preprocessing",
+            "repair_strategy": "patched",
+        }
+
+    monkeypatch.setattr("bt5151_credit_risk.preprocess.load_skill_prompt", fake_load_skill_prompt)
+    monkeypatch.setattr("bt5151_credit_risk.preprocess._call_preprocess_codegen_agent", fake_codegen_agent)
+
+    previous_generated_code = {
+        "code": "def run_preprocessing(raw_df, workspace_path):\n    return raw_df.copy()",
+        "entrypoint": "run_preprocessing",
+    }
+    code_review = {
+        "passed": False,
+        "issues": [{"rule": "forbidden_import", "message": "Importing subprocess is not allowed."}],
+    }
+    execution_log = {
+        "returncode": 1,
+        "stdout": "",
+        "stderr": "Traceback (most recent call last): ...",
+        "timed_out": False,
+    }
+    validation_report = {
+        "passed": False,
+        "errors": [{"rule": "target_excluded", "message": "Target column is still present."}],
+    }
+    dataset_profile = {
+        "row_count": len(sample_frame),
+        "target_distribution": sample_frame["Credit_Score"].value_counts().to_dict(),
+        "missing_counts": sample_frame.isna().sum().to_dict(),
+    }
+    dataset_policy_spec = _sample_policy_spec()
+    column_transform_spec = _sample_column_transform_spec()
+
+    result = repair_preprocessing_code(
+        previous_generated_code=previous_generated_code,
+        code_review=code_review,
+        execution_log=execution_log,
+        validation_report=validation_report,
+        dataset_profile=dataset_profile,
+        dataset_policy_spec=dataset_policy_spec,
+        column_transform_spec=column_transform_spec,
+    )
+
+    assert result["code"] == "def run_preprocessing(raw_df, workspace_path):\n    return raw_df"
+    assert result["entrypoint"] == "run_preprocessing"
+    assert result["repair_strategy"] == "patched"
+    assert captured["system_prompt"] == "runtime repair prompt"
+    assert captured["payload"]["previous_generated_code"] == previous_generated_code
+    assert captured["payload"]["code_review"] == code_review
+    assert captured["payload"]["execution_log"] == execution_log
+    assert captured["payload"]["validation_report"] == validation_report
+    assert captured["payload"]["dataset_profile"] == dataset_profile
+    assert captured["payload"]["dataset_policy_spec"] == dataset_policy_spec
+    assert captured["payload"]["column_transform_spec"] == column_transform_spec
 
 
 def test_inspect_preprocessing_code_rejects_subprocess_import():

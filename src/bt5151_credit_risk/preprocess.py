@@ -83,6 +83,29 @@ def generate_preprocessing_code(
     return _call_preprocess_codegen_agent(system_prompt, payload)
 
 
+def repair_preprocessing_code(
+    *,
+    previous_generated_code: dict,
+    code_review: dict,
+    execution_log: dict,
+    validation_report: dict,
+    dataset_profile: dict,
+    dataset_policy_spec: dict,
+    column_transform_spec: dict,
+) -> dict:
+    system_prompt = load_skill_prompt("repair-preprocessing-code")
+    payload = {
+        "previous_generated_code": previous_generated_code,
+        "code_review": code_review,
+        "execution_log": execution_log,
+        "validation_report": validation_report,
+        "dataset_profile": dataset_profile,
+        "dataset_policy_spec": dataset_policy_spec,
+        "column_transform_spec": column_transform_spec,
+    }
+    return _call_preprocess_codegen_agent(system_prompt, payload)
+
+
 def inspect_preprocessing_code(generated_code: dict) -> dict:
     code = generated_code.get("code", "")
     entrypoint = generated_code.get("entrypoint")
