@@ -1,4 +1,4 @@
-"""Tests for cache provenance contract."""
+"""Tests for cache provenance contract and run_stage provenance binding."""
 
 import pytest
 
@@ -61,6 +61,32 @@ def test_load_cache_returns_none_when_file_missing(tmp_path, monkeypatch):
 
     state = load_cache()
     assert state is None
+
+
+def test_run_stage_build_provenance_metadata_includes_log_and_bundle_paths(tmp_path):
+    """_build_provenance_metadata returns log_path ending .log and bundle_path ending .json."""
+    import sys
+
+    sys.path.insert(0, str(tmp_path.parent.parent / "BT5151 GroupProject"))
+
+    # Import directly from run_stage (not a package — use importlib)
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "run_stage",
+        Path(__file__).resolve().parent.parent / "run_stage.py",
+    )
+    rs = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(rs)
+
+    metadata = rs._build_provenance_metadata("20260416_120000", Path("/tmp/stage_full_20260416_120000.log"))
+
+    assert metadata["cache_log_path"].endswith(".log")
+    assert metadata["cache_bundle_path"].endswith(".json")
+    assert "20260416_120000" in metadata["cache_log_path"]
+    assert "20260416_120000" in metadata["cache_bundle_path"]
+    assert "cache_saved_at" in metadata
 
 
 def test_cache_log_path_accessible_from_state(tmp_path, monkeypatch):

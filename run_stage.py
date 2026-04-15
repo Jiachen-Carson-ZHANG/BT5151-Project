@@ -339,6 +339,18 @@ def print_usage(logger):
                     call["input_tokens"], call["output_tokens"], call["duration_s"])
 
 
+def _build_provenance_metadata(run_id: str, log_file: Path) -> dict:
+    """Build the cache provenance metadata dict from run identifiers."""
+    from datetime import timezone
+
+    bundle_path = LOG_DIR / f"analysis_bundle_{run_id}.json"
+    return {
+        "cache_log_path": str(log_file),
+        "cache_bundle_path": str(bundle_path),
+        "cache_saved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] not in STAGES:
         print(__doc__)
@@ -358,15 +370,38 @@ def main():
     if save_cache_flag:
         logger.info("--save-cache enabled: pipeline state will be serialized after run")
 
+    # Write active run status so the app can poll progress.
+    metadata = _build_provenance_metadata(run_id, log_file)
+    from bt5151_credit_risk.run_status import (
+        mark_run_completed,
+        mark_run_failed,
+        write_active_run,
+    )
+    write_active_run(
+        run_id=run_id,
+        stage=stage,
+        row_index=row_index,
+        log_path=metadata["cache_log_path"],
+        bundle_path=metadata["cache_bundle_path"],
+    )
+
     reset_usage_log()
-    result = run_stage(logger, stage, row_index, run_id)
+    result = None
+    try:
+        result = run_stage(logger, stage, row_index, run_id)
+    except Exception as exc:
+        mark_run_failed(run_id, error=str(exc)[:200])
+        raise
+
     print_usage(logger)
     logger.info("Full log saved to: %s", log_file)
 
     if save_cache_flag and result is not None:
         from bt5151_credit_risk.cache import save_cache
-        cache_path = save_cache(result)
+        cache_path = save_cache(result, metadata=metadata)
         logger.info("Pipeline cache saved → %s (launch app.py to use it)", cache_path)
+
+    mark_run_completed(run_id)
 
 
 if __name__ == "__main__":
