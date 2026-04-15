@@ -16,10 +16,17 @@ def sample_frame():
 
 
 def test_dataset_profile_contains_core_fields(sample_frame):
-    profile = build_dataset_profile(sample_frame)
+    profile = build_dataset_profile(sample_frame, target_column="Credit_Score")
     assert "row_count" in profile
     assert "target_distribution" in profile
     assert "missing_counts" in profile
+
+
+def test_dataset_profile_without_target_column(sample_frame):
+    profile = build_dataset_profile(sample_frame)
+    assert "row_count" in profile
+    assert "missing_counts" in profile
+    assert "target_distribution" not in profile
 
 
 def test_state_has_expected_keys():
@@ -37,6 +44,32 @@ def test_state_has_expected_keys():
     assert state.preprocessing_audit_report is None
     assert state.preprocessing_validation_report is None
     assert state.preprocessing_attempt_count == 0
+    assert state.feature_engineering_code is None
+    assert state.feature_engineering_code_review is None
+    assert state.feature_engineering_execution_log is None
+    assert state.feature_engineering_validation_report is None
+    assert state.feature_engineering_hypothesis is None
+    assert state.feature_engineering_attempt_count == 0
+    assert state.global_shap_importance is None
+    assert state.eda_report is None
+    assert state.learning_curves is None
+    assert state.tuning_trial_history is None
+    assert state.eda_hypotheses is None
+    assert state.training_diagnostics is None
+    assert state.train_group_values is None
+    assert state.test_group_values is None
+    assert state.train_time_values is None
+    assert state.test_time_values is None
+    assert state.train_views is None
+    assert state.test_views is None
+    assert state.full_feature_frames_by_view is None
+    assert state.feature_columns_by_view is None
+    assert state.model_view_map is None
+    assert state.global_xai_results is None
+    assert state.local_xai_cases is None
+    assert state.xai_interpretation is None
+    assert state.analysis_bundle is None
+    assert state.analysis_bundle_summary is None
 
 
 def test_state_accepts_new_preprocessing_fields():

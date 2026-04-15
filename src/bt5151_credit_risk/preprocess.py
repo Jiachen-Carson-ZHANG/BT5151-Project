@@ -6,9 +6,9 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
+import numpy as np
 import pandas as pd
 
-from bt5151_credit_risk.config import GROUP_COLUMN, TARGET_COLUMN, TEST_SIZE
 from bt5151_credit_risk.llm import call_json_response
 from bt5151_credit_risk.skill_prompts import load_skill_prompt
 
@@ -24,22 +24,61 @@ def _call_preprocess_codegen_agent(system_prompt, payload, caller="preprocess-co
 # Ask the LLM for dataset-level preprocessing decisions.
 def generate_dataset_policy_spec(df: pd.DataFrame, dataset_profile: dict) -> dict:
     system_prompt = load_skill_prompt("dataset-policy-spec")
+    column_summaries = {}
+    for col in df.columns:
+        nunique = df[col].nunique()
+        column_summaries[col] = {
+            "dtype": str(df[col].dtype),
+            "nunique": nunique,
+        }
+        if nunique <= 20:
+            column_summaries[col]["unique_values"] = df[col].dropna().unique().tolist()[:20]
     payload = {
         "columns": df.columns.tolist(),
+        "column_summaries": column_summaries,
         "sample_rows": df.head(5).to_dict(orient="records"),
         "dataset_profile": dataset_profile,
     }
     return _call_preprocess_agent(system_prompt, payload, caller="dataset-policy-spec")
 
 
+# Build per-column data profiles so the column-transform-spec LLM sees real distributions.
+def _build_column_profiles(df: pd.DataFrame) -> dict:
+    profiles = {}
+    for col in df.columns:
+        entry = {"dtype": str(df[col].dtype), "nunique": int(df[col].nunique())}
+        if pd.api.types.is_numeric_dtype(df[col]):
+            desc = df[col].describe(percentiles=[0.01, 0.99])
+            entry["min"] = float(desc["min"]) if "min" in desc else None
+            entry["max"] = float(desc["max"]) if "max" in desc else None
+            entry["mean"] = float(desc["mean"]) if "mean" in desc else None
+            entry["p1"] = float(desc["1%"]) if "1%" in desc else None
+            entry["p99"] = float(desc["99%"]) if "99%" in desc else None
+        else:
+            top_values = df[col].value_counts(dropna=False).head(10)
+            entry["top_10_values"] = {str(k): int(v) for k, v in top_values.items()}
+        profiles[col] = entry
+    return profiles
+
+
 # Ask the LLM for column-by-column transformation rules.
-def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict) -> dict:
+def generate_column_transform_spec(df: pd.DataFrame, dataset_policy_spec: dict, eda_report: dict | None = None) -> dict:
     system_prompt = load_skill_prompt("column-transform-spec")
     payload = {
         "columns": df.columns.tolist(),
-        "sample_rows": df.head(5).to_dict(orient="records"),
+        "sample_rows": df.head(10).to_dict(orient="records"),
+        "column_profiles": _build_column_profiles(df),
         "dataset_policy_spec": dataset_policy_spec,
     }
+    if eda_report:
+        payload["eda_insights"] = {
+            "top_discriminative_features": eda_report.get("top_discriminative_features", [])[:10],
+            "high_correlation_pairs": eda_report.get("correlations", {}).get("high_pairs", [])[:10],
+            "highly_skewed_columns": eda_report.get("skewness", {}).get("highly_skewed", {}),
+            "high_cardinality_columns": eda_report.get("cardinality", {}).get("high_cardinality", []),
+            "mnar_suspects": eda_report.get("missing_patterns", {}).get("mnar_suspects", []),
+            "class_separability": eda_report.get("class_separability", {}).get("anova_top_features", [])[:10],
+        }
     return _call_preprocess_agent(system_prompt, payload, caller="column-transform-spec")
 
 
@@ -53,7 +92,8 @@ def generate_preprocessing_code(
     system_prompt = load_skill_prompt("generate-preprocessing-code")
     payload = {
         "columns": raw_df.columns.tolist(),
-        "sample_rows": raw_df.head(5).to_dict(orient="records"),
+        "sample_rows": raw_df.head(10).to_dict(orient="records"),
+        "column_profiles": _build_column_profiles(raw_df),
         "dataset_profile": dataset_profile,
         "dataset_policy_spec": dataset_policy_spec,
         "column_transform_spec": column_transform_spec,
@@ -62,6 +102,8 @@ def generate_preprocessing_code(
 
 
 # Ask the LLM to fix the last preprocessing attempt using failure feedback.
+# When `escalate=True`, the call is routed through an escalated-caller identifier so
+# operators can map it to a stronger model via OPENAI_MODEL_REPAIR_PREPROCESSING_CODE_ESCALATED.
 def repair_preprocessing_code(
     *,
     previous_generated_code: dict,
@@ -71,6 +113,7 @@ def repair_preprocessing_code(
     dataset_profile: dict,
     dataset_policy_spec: dict,
     column_transform_spec: dict,
+    escalate: bool = False,
 ) -> dict:
     system_prompt = load_skill_prompt("repair-preprocessing-code")
     payload = {
@@ -82,7 +125,17 @@ def repair_preprocessing_code(
         "dataset_policy_spec": dataset_policy_spec,
         "column_transform_spec": column_transform_spec,
     }
-    return _call_preprocess_codegen_agent(system_prompt, payload, caller="repair-preprocessing-code")
+    if escalate:
+        payload["escalation_notice"] = (
+            "The same semantic-role violation appeared in the previous repair attempt. "
+            "Treat this as a capability-ceiling signal: re-read the column_transform_spec's "
+            "semantic_role and representation_intent carefully before emitting code. "
+            "If a multi_value_set indicator is producing values outside {0,1}, the fix is almost "
+            "always to replace a count-based encoding (str.count or summed dummies) with a "
+            "presence-based one (str.get_dummies(sep=...) with whitespace-stripped column names)."
+        )
+    caller = "repair-preprocessing-code-escalated" if escalate else "repair-preprocessing-code"
+    return _call_preprocess_codegen_agent(system_prompt, payload, caller=caller)
 
 
 # Reject obviously unsafe or incomplete generated code before execution.
@@ -120,6 +173,17 @@ def inspect_preprocessing_code(generated_code: dict) -> dict:
     FORBIDDEN_MODULES = {"subprocess", "socket", "http", "urllib", "ftplib", "smtplib", "ctypes", "multiprocessing"}
     FORBIDDEN_OS_ATTRS = {"system", "popen", "exec", "execl", "execle", "execlp", "execlpe", "execv", "execve", "execvp", "execvpe", "spawn", "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe"}
     FORBIDDEN_BUILTINS = {"eval", "exec", "__import__", "compile", "breakpoint"}
+
+    # Reject inplace=True — incompatible with pandas 2.x Copy-on-Write.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for kw in node.keywords:
+                if kw.arg == "inplace" and isinstance(kw.value, ast.Constant) and kw.value.value is True:
+                    lineno = getattr(node, "lineno", "?")
+                    issues.append({
+                        "rule": "inplace_not_allowed",
+                        "message": f"Line {lineno}: inplace=True is not allowed — pandas 2.x Copy-on-Write raises ChainedAssignmentError. Use assignment instead: df['col'] = df['col'].method(...).",
+                    })
 
     # Walk the AST so we can catch unsafe patterns before running the generated file.
     for node in ast.walk(tree):
@@ -251,7 +315,7 @@ def execute_generated_preprocessing(
         encoding="utf-8",
     )
 
-    timeout_seconds = 60
+    timeout_seconds = 120
     try:
         completed = subprocess.run(
             [sys.executable, str(runner_path), str(code_path), str(raw_frame_path), str(workspace_path)],
@@ -269,10 +333,12 @@ def execute_generated_preprocessing(
             "timeout_seconds": timeout_seconds,
         }
     except subprocess.TimeoutExpired as exc:
+        raw_stdout = exc.stdout or ""
+        raw_stderr = exc.stderr or ""
         execution_log = {
             "returncode": None,
-            "stdout": exc.stdout or "",
-            "stderr": exc.stderr or "",
+            "stdout": raw_stdout.decode("utf-8", errors="replace") if isinstance(raw_stdout, bytes) else raw_stdout,
+            "stderr": raw_stderr.decode("utf-8", errors="replace") if isinstance(raw_stderr, bytes) else raw_stderr,
             "timed_out": True,
             "timeout_seconds": timeout_seconds,
         }
@@ -308,6 +374,263 @@ def execute_generated_preprocessing(
     }
 
 
+# Roles that must NEVER appear in the feature frame (identifier-like or target).
+_ABSENT_ROLES = {"identifier", "group_identifier", "target", "leakage_risk_feature"}
+
+# Roles whose encoded output may explode into multiple prefixed indicator columns.
+_PREFIX_ROLES = {"multi_value_set", "unordered_categorical", "free_text"}
+
+
+def _unique_non_null(series: pd.Series) -> set:
+    vals = series.dropna().unique()
+    return set(vals.tolist()) if len(vals) else set()
+
+
+def _is_binary_set(values: set) -> bool:
+    return all(float(v) in (0.0, 1.0) for v in values if not isinstance(v, bool))
+
+
+# Deterministic contract validator: for each column's declared semantic_role,
+# check the post-preprocessing output against the role's invariant. Produces
+# structured findings the repair prompt can act on directly.
+def validate_semantic_roles(
+    feature_frame: pd.DataFrame,
+    column_transform_spec: dict,
+) -> list[dict]:
+    raw_spec = column_transform_spec or {}
+    # Normalize: accept both "transforms" (current schema) and "columns" (deprecated).
+    transforms = raw_spec.get("transforms") or raw_spec.get("columns") or {}
+    frame_cols = list(feature_frame.columns)
+    frame_col_set = set(frame_cols)
+    violations: list[dict] = []
+
+    # Fail loudly if no column declares a semantic_role — the validator is a no-op
+    # without roles, and we need to know when the spec regresses.
+    has_any_role = any(
+        isinstance(spec, dict) and spec.get("semantic_role")
+        for spec in transforms.values()
+    )
+    if transforms and not has_any_role:
+        violations.append({
+            "column": None,
+            "declared_role": None,
+            "violation": "schema_missing_semantic_roles",
+            "observed": "column_transform_spec contains columns but none declare semantic_role",
+            "expected": "every column should have a semantic_role for contract enforcement",
+            "likely_cause": (
+                "the column-transform-spec skill may have regressed to the old schema. "
+                "Check that the reasoning model is using the updated prompt with the "
+                "12-role taxonomy. This is a spec issue, not a codegen issue."
+            ),
+        })
+        return violations
+
+    def record(column, role, violation, observed, expected, likely_cause):
+        violations.append({
+            "column": column,
+            "declared_role": role,
+            "violation": violation,
+            "observed": observed,
+            "expected": expected,
+            "likely_cause": likely_cause,
+        })
+
+    def matching_columns(col: str, role: str) -> list[str]:
+        exact = [col] if col in frame_col_set else []
+        if role in _PREFIX_ROLES:
+            prefixed = [c for c in frame_cols if c.startswith(f"{col}_")]
+            return exact + prefixed
+        return exact
+
+    for col, spec in transforms.items():
+        if not isinstance(spec, dict):
+            continue
+        role = spec.get("semantic_role")
+        action = spec.get("action", "keep")
+        intent = spec.get("representation_intent")
+
+        if not role:
+            # If other columns in this spec already declare roles, a missing role
+            # is a partial regression — the reasoning model dropped the field for
+            # this column. Emit a violation so repair / the operator can see it.
+            if has_any_role and action not in ("drop", "quarantine"):
+                record(
+                    column=col,
+                    role=None,
+                    violation="missing_semantic_role",
+                    observed=f"column spec has no semantic_role (action={action})",
+                    expected="every kept column must declare a semantic_role",
+                    likely_cause=(
+                        "the reasoning model declared semantic_role on some columns "
+                        "but missed this one. This is a spec issue — re-run "
+                        "column-transform-spec or patch the spec manually."
+                    ),
+                )
+            continue
+
+        # Absence checks: identifier / group / target / leakage / dropped / quarantined
+        if role in _ABSENT_ROLES or action in ("drop", "quarantine"):
+            leaked = matching_columns(col, role)
+            if leaked:
+                record(
+                    column=col,
+                    role=role,
+                    violation="must_be_absent",
+                    observed=f"present in feature frame as {leaked[:5]}",
+                    expected=f"absent (role={role}, action={action})",
+                    likely_cause=(
+                        "drop step missed this column, or an encoded derivative of "
+                        "it remains. Remove the column (and any prefix-derived indicators) "
+                        "before saving feature_frame.csv."
+                    ),
+                )
+            continue
+
+        # Kept features: check each matching column against role invariant.
+        matched = matching_columns(col, role)
+        if not matched:
+            record(
+                column=col,
+                role=role,
+                violation="missing",
+                observed="no column or prefixed indicators found in feature frame",
+                expected=f"kept column (role={role}) must appear in feature frame",
+                likely_cause="column was dropped despite action=keep, or was renamed without updating the spec",
+            )
+            continue
+
+        for m in matched:
+            series = feature_frame[m]
+            numeric = pd.api.types.is_numeric_dtype(series)
+            uniq = _unique_non_null(series) if numeric else set()
+
+            if role == "binary_flag":
+                if not numeric or not uniq.issubset({0, 1, 0.0, 1.0}):
+                    bad = sorted([v for v in uniq if float(v) not in (0.0, 1.0)])[:5]
+                    record(
+                        column=m, role=role,
+                        violation="not_binary",
+                        observed=f"values include {bad}" if bad else f"dtype={series.dtype}",
+                        expected="values ⊆ {0, 1}",
+                        likely_cause="binary_flag must be mapped to {0,1} numerically; check for unmapped string values or dtype=object.",
+                    )
+
+            elif role == "multi_value_set":
+                # Exact-name column still present means the raw list wasn't encoded.
+                if m == col:
+                    record(
+                        column=m, role=role,
+                        violation="not_exploded",
+                        observed="original delimited column still present",
+                        expected="exploded into prefixed binary indicators, original dropped",
+                        likely_cause="use str.get_dummies(sep=...) on the cleaned column, then drop the original",
+                    )
+                    continue
+                if intent == "binary_membership" or intent is None:
+                    if numeric and not _is_binary_set(uniq):
+                        bad = sorted([v for v in uniq if float(v) not in (0.0, 1.0)])[:5]
+                        record(
+                            column=m, role=role,
+                            violation="indicator_not_binary",
+                            observed=f"values include {bad}",
+                            expected="values ⊆ {0, 1} (presence indicator)",
+                            likely_cause=(
+                                "multi-hot encoder counted occurrences instead of presence. "
+                                "Use str.get_dummies(sep=', ') which produces {0,1} indicators, "
+                                "or apply `int(token in set_of_tokens)` — never str.count or sum of dummies."
+                            ),
+                        )
+
+            elif role == "ordered_categorical":
+                if numeric and uniq:
+                    non_int = [v for v in uniq if float(v) != int(float(v))]
+                    negatives = [v for v in uniq if float(v) < 0]
+                    if non_int or negatives:
+                        record(
+                            column=m, role=role,
+                            violation="not_ordinal_encoded",
+                            observed=f"values={sorted(uniq)[:10]}",
+                            expected="integer codes 0..K-1 preserving declared order",
+                            likely_cause="ordered_categorical should be mapped to integer ordinal codes preserving semantic order, not scaled or one-hot encoded.",
+                        )
+                    else:
+                        # Values are non-negative integers — verify contiguous 0..K-1.
+                        int_vals = sorted(int(float(v)) for v in uniq)
+                        expected_seq = list(range(len(int_vals)))
+                        if int_vals != expected_seq:
+                            record(
+                                column=m, role=role,
+                                violation="ordinal_not_contiguous",
+                                observed=f"values={int_vals[:10]}",
+                                expected=f"contiguous 0..{len(int_vals)-1}",
+                                likely_cause=(
+                                    "ordinal encoding must map categories to contiguous "
+                                    "integers starting at 0. Gaps (e.g. {0,2,5}) or "
+                                    "1-based indexing (e.g. {1,2,3}) break tree splits "
+                                    "and linear model assumptions. Re-map to 0..K-1."
+                                ),
+                            )
+
+            elif role == "unordered_categorical":
+                if intent == "one_hot" and m != col and numeric:
+                    if not _is_binary_set(uniq):
+                        bad = sorted([v for v in uniq if float(v) not in (0.0, 1.0)])[:5]
+                        record(
+                            column=m, role=role,
+                            violation="one_hot_not_binary",
+                            observed=f"values include {bad}",
+                            expected="values ⊆ {0, 1}",
+                            likely_cause="one-hot indicator is not binary; duplicate categories may have been summed. Strip category labels and deduplicate before pivoting.",
+                        )
+
+            elif role == "numeric_count":
+                if numeric and (series.dropna() < 0).any():
+                    record(
+                        column=m, role=role,
+                        violation="negative_count",
+                        observed=f"min={float(series.min())}",
+                        expected="values >= 0",
+                        likely_cause="count values must be non-negative; clip lower bound to 0 or check parsing (a '-' in the raw string may have been preserved).",
+                    )
+
+            elif role == "numeric_continuous":
+                if numeric and series.isna().any():
+                    record(
+                        column=m, role=role,
+                        violation="has_nan",
+                        observed=f"{int(series.isna().sum())} NaN values",
+                        expected="no NaN (imputation should fill)",
+                        likely_cause="imputation step did not cover this column; verify the imputation branch runs after cleaning.",
+                    )
+                if numeric and np.isinf(series).any():
+                    n_inf = int(np.isinf(series).sum())
+                    record(
+                        column=m, role=role,
+                        violation="has_inf",
+                        observed=f"{n_inf} inf/-inf values",
+                        expected="finite values only (no inf/-inf)",
+                        likely_cause=(
+                            "a transform produced infinity — common causes: "
+                            "division by zero, log(0), or inverse of near-zero values. "
+                            "Replace inf with np.nan then impute, or clip before the transform."
+                        ),
+                    )
+
+            elif role == "temporal_feature":
+                # Temporal columns are typically decomposed; if the original string column
+                # still appears as object dtype, decomposition did not run.
+                if m == col and not numeric and series.dtype == object:
+                    record(
+                        column=m, role=role,
+                        violation="not_decomposed",
+                        observed=f"original temporal column present as dtype=object",
+                        expected="decomposed into numeric features (year/month/dow/etc.) per representation_intent",
+                        likely_cause="temporal_feature must be parsed with pd.to_datetime and decomposed into numeric components; drop the original string column after decomposition.",
+                    )
+
+    return violations
+
+
 # Check that generated artifacts are usable and do not violate split or leakage rules.
 def validate_preprocessing_output(
     execution_result: dict,
@@ -320,8 +643,14 @@ def validate_preprocessing_output(
     feature_frame_path = Path(artifacts.get("feature_frame.csv", ""))
     target_path = Path(artifacts.get("target.csv", ""))
     split_manifest_path = Path(artifacts.get("split_manifest.json", ""))
-    target_column = dataset_policy_spec.get("target_column", TARGET_COLUMN)
-    group_column = dataset_policy_spec.get("group_column", GROUP_COLUMN)
+    if "target_column" not in dataset_policy_spec:
+        return {
+            "passed": False,
+            "checks": {},
+            "errors": [{"rule": "missing_spec_field", "message": "dataset_policy_spec is missing 'target_column'."}],
+        }
+    target_column = dataset_policy_spec["target_column"]
+    group_column = dataset_policy_spec.get("group_column")
     split_strategy = dataset_policy_spec.get("split_strategy", {})
 
     checks: dict[str, bool] = {}
@@ -433,8 +762,132 @@ def validate_preprocessing_output(
     else:
         checks["group_overlap_zero"] = True
 
+    # --- Data quality checks (warnings feed into repair loop but do not block pass) ---
+    warnings: list[dict] = []
+    cleaned_frame_path = Path(artifacts.get("cleaned_frame.csv", ""))
+
+    if feature_frame is not None:
+        # Remaining NaNs — imputation should leave zero
+        nan_counts = feature_frame.isna().sum()
+        total_nans = int(nan_counts.sum())
+        if total_nans > 0:
+            nan_cols = {col: int(v) for col, v in nan_counts.items() if v > 0}
+            warnings.append({
+                "rule": "remaining_nans",
+                "message": f"Feature frame has {total_nans} NaN values across {len(nan_cols)} columns.",
+                "details": nan_cols,
+            })
+
+        # Feature count — flag cardinality explosion from one-hot encoding
+        n_features = len(feature_frame.columns)
+        if n_features > 200:
+            warnings.append({
+                "rule": "high_feature_count",
+                "message": f"Feature frame has {n_features} columns — possible cardinality explosion from encoding. Consider using label encoding or grouping rare categories for high-cardinality columns.",
+            })
+
+        # Constant features — zero variance adds noise, no signal
+        constant_cols = [col for col in feature_frame.columns if feature_frame[col].nunique(dropna=False) <= 1]
+        if constant_cols:
+            warnings.append({
+                "rule": "constant_features",
+                "message": f"{len(constant_cols)} constant feature(s) detected: {constant_cols[:10]}. These add no predictive value.",
+            })
+
+    # Cleaned frame NaN check — should also be zero after imputation
+    if cleaned_frame_path.is_file():
+        try:
+            cleaned_frame = pd.read_csv(cleaned_frame_path, nrows=1000)
+            cleaned_nans = int(cleaned_frame.isna().sum().sum())
+            if cleaned_nans > 0:
+                warnings.append({
+                    "rule": "cleaned_frame_has_nans",
+                    "message": f"cleaned_frame.csv still has NaN values (sampled first 1000 rows: {cleaned_nans} NaNs). Imputation may be incomplete.",
+                })
+        except Exception:
+            pass  # Non-critical — skip if unreadable
+
+    # --- Semantic role contract checks (deterministic, per-column) ---
+    role_violations: list[dict] = []
+    if feature_frame is not None and column_transform_spec:
+        try:
+            role_violations = validate_semantic_roles(feature_frame, column_transform_spec)
+        except Exception as exc:  # pragma: no cover - defensive: validator must never crash the loop
+            role_violations = []
+            warnings.append({
+                "rule": "semantic_role_validator_error",
+                "message": f"semantic role validator raised {type(exc).__name__}: {exc}",
+            })
+
     return {
-        "passed": all(checks.values()) and not errors,
+        "passed": all(checks.values()) and not errors and not role_violations,
         "checks": checks,
         "errors": errors,
+        "warnings": warnings,
+        "role_violations": role_violations,
     }
+
+
+def _build_column_stats(df: pd.DataFrame) -> list[dict]:
+    """Build per-column statistics for the LLM quality reviewer."""
+    stats = []
+    for col in df.columns:
+        entry = {
+            "column": col,
+            "dtype": str(df[col].dtype),
+            "nunique": int(df[col].nunique()),
+            "null_count": int(df[col].isna().sum()),
+        }
+        if pd.api.types.is_numeric_dtype(df[col]):
+            entry["min"] = float(df[col].min()) if not df[col].isna().all() else None
+            entry["max"] = float(df[col].max()) if not df[col].isna().all() else None
+            entry["mean"] = float(df[col].mean()) if not df[col].isna().all() else None
+        stats.append(entry)
+    return stats
+
+
+# Ask the LLM to review the quality of preprocessing output.
+def review_preprocessing_quality(
+    execution_result: dict,
+    dataset_policy_spec: dict,
+    column_transform_spec: dict,
+    previous_audit_report: dict | None = None,
+) -> dict:
+    system_prompt = load_skill_prompt("audit-preprocessing")
+    artifacts = execution_result.get("artifacts", {})
+
+    feature_frame_path = Path(artifacts.get("feature_frame.csv", ""))
+    target_path = Path(artifacts.get("target.csv", ""))
+    report_path = Path(artifacts.get("preprocessing_report.json", ""))
+
+    feature_frame = pd.read_csv(feature_frame_path)
+
+    # 5 rows for pattern-checking; full-frame stats carry the distribution picture.
+    feature_sample = feature_frame.head(5).to_dict(orient="records")
+    feature_stats = _build_column_stats(feature_frame)
+
+    target_distribution = None
+    if target_path.is_file():
+        target_df = pd.read_csv(target_path)
+        target_distribution = target_df.iloc[:, 0].value_counts(dropna=False).to_dict()
+
+    preprocessing_report = None
+    if report_path.is_file():
+        try:
+            preprocessing_report = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    payload = {
+        "dataset_policy_spec": dataset_policy_spec,
+        "column_transform_spec": column_transform_spec,
+        "feature_sample": feature_sample,
+        "feature_stats": feature_stats,
+        "target_distribution": target_distribution,
+        "feature_column_count": len(feature_frame.columns),
+        "preprocessing_report": preprocessing_report,
+    }
+    if previous_audit_report:
+        payload["previous_audit_report"] = previous_audit_report
+
+    return _call_preprocess_agent(system_prompt, payload, caller="audit-preprocessing")

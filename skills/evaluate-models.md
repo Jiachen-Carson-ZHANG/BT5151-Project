@@ -1,6 +1,6 @@
 ---
 name: evaluate-models
-description: Evaluate candidate credit risk models with BT5151-required multi-class metrics.
+description: Evaluate candidate models with task-appropriate multi-class metrics.
 ---
 
 ## When to use

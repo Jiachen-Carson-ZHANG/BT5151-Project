@@ -10,6 +10,7 @@ from bt5151_credit_risk.preprocess import generate_preprocessing_code
 from bt5151_credit_risk.preprocess import inspect_preprocessing_code
 from bt5151_credit_risk.preprocess import repair_preprocessing_code
 from bt5151_credit_risk.preprocess import validate_preprocessing_output
+from bt5151_credit_risk.preprocess import validate_semantic_roles
 
 
 @pytest.fixture
@@ -96,6 +97,12 @@ def test_generate_dataset_policy_spec_uses_runtime_skill_prompt(sample_frame, mo
             "group_column": "Customer_ID",
             "identifier_columns": ["ID", "Name", "SSN"],
             "split_strategy": {"type": "grouped_holdout", "test_size": 0.2},
+            "validation_policy": {
+                "type": "grouped_entity",
+                "group_column": "Customer_ID",
+                "time_column": None,
+                "stratify_target": True,
+            },
             "leakage_rules": {"drop_columns": ["ID", "Name", "SSN"]},
             "imbalance_strategy": {"method": "none"},
             "feature_policy": {"categorical_encoding": "one_hot"},
@@ -118,6 +125,7 @@ def test_generate_dataset_policy_spec_uses_runtime_skill_prompt(sample_frame, mo
     assert policy["target_column"] == "Credit_Score"
     assert policy["group_column"] == "Customer_ID"
     assert policy["split_strategy"]["type"] == "grouped_holdout"
+    assert policy["validation_policy"]["type"] == "grouped_entity"
 
 
 def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, monkeypatch):
@@ -131,13 +139,29 @@ def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, 
         captured["system_prompt"] = system_prompt
         captured["payload"] = payload
         return {
-            "columns": {
-                "Age": {"action": "keep", "imputation": "median"},
-                "Outstanding_Debt": {"action": "keep", "imputation": "median"},
-                "Occupation": {"action": "keep", "encoding": "one_hot", "imputation": "mode"},
-                "ID": {"action": "drop"},
-                "Name": {"action": "drop"},
-                "SSN": {"action": "drop"},
+            "transforms": {
+                "Age": {
+                    "action": "keep",
+                    "semantic_role": "numeric_continuous",
+                    "imputation": "median",
+                    "representation_intent": "standardized",
+                },
+                "Outstanding_Debt": {
+                    "action": "keep",
+                    "semantic_role": "numeric_continuous",
+                    "imputation": "median",
+                    "representation_intent": "standardized",
+                },
+                "Occupation": {
+                    "action": "keep",
+                    "semantic_role": "unordered_categorical",
+                    "encoding": "one_hot",
+                    "imputation": "mode",
+                    "representation_intent": "one_hot",
+                },
+                "ID": {"action": "drop", "semantic_role": "identifier"},
+                "Name": {"action": "drop", "semantic_role": "identifier"},
+                "SSN": {"action": "drop", "semantic_role": "identifier"},
             }
         }
 
@@ -153,10 +177,11 @@ def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, 
 
     assert captured["system_prompt"] == "runtime column transform prompt"
     assert captured["payload"]["columns"] == sample_frame.columns.tolist()
-    assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+    assert captured["payload"]["sample_rows"] == sample_frame.head(10).to_dict(orient="records")
+    assert "column_profiles" in captured["payload"]
     assert captured["payload"]["dataset_policy_spec"] == policy
-    assert spec["columns"]["Age"]["imputation"] == "median"
-    assert spec["columns"]["Occupation"]["encoding"] == "one_hot"
+    assert spec["transforms"]["Age"]["imputation"] == "median"
+    assert spec["transforms"]["Occupation"]["encoding"] == "one_hot"
 
 
 def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sample_frame, monkeypatch):
@@ -199,7 +224,8 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
     assert captured["payload"]["dataset_policy_spec"] == dataset_policy_spec
     assert captured["payload"]["column_transform_spec"] == column_transform_spec
     assert captured["payload"]["columns"] == sample_frame.columns.tolist()
-    assert captured["payload"]["sample_rows"] == sample_frame.head(5).to_dict(orient="records")
+    assert captured["payload"]["sample_rows"] == sample_frame.head(10).to_dict(orient="records")
+    assert "column_profiles" in captured["payload"]
 
 
 def test_repair_preprocessing_code_uses_runtime_prompt_and_failure_context(sample_frame, monkeypatch):
@@ -347,6 +373,12 @@ def _sample_policy_spec():
         "group_column": "Customer_ID",
         "identifier_columns": ["ID", "Name", "SSN"],
         "split_strategy": {"type": "grouped_holdout", "test_size": 0.34},
+        "validation_policy": {
+            "type": "grouped_entity",
+            "group_column": "Customer_ID",
+            "time_column": None,
+            "stratify_target": True,
+        },
         "leakage_rules": {"drop_columns": ["ID", "Name", "SSN"]},
         "imbalance_strategy": {"method": "none"},
         "feature_policy": {"categorical_encoding": "one_hot"},
@@ -355,15 +387,31 @@ def _sample_policy_spec():
 
 def _sample_column_transform_spec():
     return {
-        "columns": {
-            "ID": {"action": "drop"},
-            "Customer_ID": {"action": "drop"},
-            "Name": {"action": "drop"},
-            "SSN": {"action": "drop"},
-            "Credit_Score": {"action": "drop"},
-            "Age": {"action": "keep", "imputation": "median"},
-            "Outstanding_Debt": {"action": "keep", "imputation": "median"},
-            "Occupation": {"action": "keep", "encoding": "one_hot", "imputation": "mode"},
+        "transforms": {
+            "ID": {"action": "drop", "semantic_role": "identifier"},
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Name": {"action": "drop", "semantic_role": "identifier"},
+            "SSN": {"action": "drop", "semantic_role": "identifier"},
+            "Credit_Score": {"action": "drop", "semantic_role": "target"},
+            "Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "imputation": "median",
+                "representation_intent": "standardized",
+            },
+            "Outstanding_Debt": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "imputation": "median",
+                "representation_intent": "standardized",
+            },
+            "Occupation": {
+                "action": "keep",
+                "semantic_role": "unordered_categorical",
+                "encoding": "one_hot",
+                "imputation": "mode",
+                "representation_intent": "one_hot",
+            },
         }
     }
 
@@ -392,7 +440,7 @@ def _generated_preprocessing_code(feature_frame_expression: str, split_manifest:
 
 def test_validate_preprocessing_output_passes_on_expected_artifacts(sample_frame, tmp_path):
     generated_code = _generated_preprocessing_code(
-        "cleaned.drop(columns=['Credit_Score'])",
+        "cleaned.drop(columns=['Credit_Score', 'ID', 'Customer_ID', 'Name', 'SSN'])",
         {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
     )
 
@@ -564,3 +612,207 @@ def test_execute_generated_preprocessing_honors_declared_entrypoint(sample_frame
     assert "custom_preprocessing" in result["execution_log"]["stdout"]
     assert Path(result["artifacts"]["cleaned_frame.csv"]).is_file()
     assert Path(result["artifacts"]["preprocessing_report.json"]).is_file()
+
+
+# ---------------------------------------------------------------------------
+# Semantic role validator tests
+# ---------------------------------------------------------------------------
+
+
+def test_validate_semantic_roles_catches_old_schema_without_roles():
+    """Old-shape spec {'columns': {...}} with no semantic_role fields triggers
+    schema_missing_semantic_roles — the validator must NOT silently become a no-op."""
+    feature_frame = pd.DataFrame({"Age": [25, 30], "Debt": [1000, 2000]})
+    old_spec = {
+        "columns": {
+            "Age": {"action": "keep", "imputation": "median"},
+            "Debt": {"action": "keep", "imputation": "median"},
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, old_spec)
+    assert len(violations) == 1
+    assert violations[0]["violation"] == "schema_missing_semantic_roles"
+
+
+def test_validate_semantic_roles_catches_mixed_schema_partial_regression():
+    """If some columns declare semantic_role but others don't, the missing ones
+    get a missing_semantic_role violation — not silently skipped."""
+    feature_frame = pd.DataFrame({"Age": [25.0, 30.0], "Income": [50000.0, 60000.0]})
+    mixed_spec = {
+        "transforms": {
+            "Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "representation_intent": "standardized",
+            },
+            "Income": {
+                "action": "keep",
+                "imputation": "median",
+                # no semantic_role — partial regression
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, mixed_spec)
+    assert any(
+        v["violation"] == "missing_semantic_role" and v["column"] == "Income"
+        for v in violations
+    )
+
+
+def test_validate_semantic_roles_no_violations_on_correct_output():
+    """A well-formed feature frame matching the declared roles produces no violations."""
+    feature_frame = pd.DataFrame({
+        "Age": [25.0, 30.0, 40.0],
+        "Outstanding_Debt": [1000.0, 2000.0, 3000.0],
+        "Occupation_Engineer": [1, 0, 0],
+        "Occupation_Analyst": [0, 1, 0],
+        "Occupation_Manager": [0, 0, 1],
+    })
+    spec = {
+        "transforms": {
+            "ID": {"action": "drop", "semantic_role": "identifier"},
+            "Credit_Score": {"action": "drop", "semantic_role": "target"},
+            "Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "representation_intent": "standardized",
+            },
+            "Outstanding_Debt": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "representation_intent": "standardized",
+            },
+            "Occupation": {
+                "action": "keep",
+                "semantic_role": "unordered_categorical",
+                "representation_intent": "one_hot",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    assert violations == []
+
+
+def test_validate_semantic_roles_catches_leaked_identifier():
+    """Identifier column still in feature frame is a must_be_absent violation."""
+    feature_frame = pd.DataFrame({"ID": ["x1", "x2"], "Age": [25.0, 30.0]})
+    spec = {
+        "transforms": {
+            "ID": {"action": "drop", "semantic_role": "identifier"},
+            "Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    assert any(v["violation"] == "must_be_absent" and v["column"] == "ID" for v in violations)
+
+
+def test_validate_semantic_roles_catches_binary_flag_violation():
+    """Binary flag with values outside {0,1} triggers not_binary."""
+    feature_frame = pd.DataFrame({"Has_Mortgage": [0, 1, 2]})
+    spec = {
+        "transforms": {
+            "Has_Mortgage": {
+                "action": "keep",
+                "semantic_role": "binary_flag",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    assert any(v["violation"] == "not_binary" and v["column"] == "Has_Mortgage" for v in violations)
+
+
+def test_validate_semantic_roles_catches_non_contiguous_ordinal():
+    """Ordered categorical with gaps (e.g. {0,2,5}) or 1-based ({1,2,3}) is rejected."""
+    import numpy as np
+
+    # 1-based: should be 0,1,2
+    frame_1based = pd.DataFrame({"Risk_Level": [1, 2, 3, 1]})
+    spec = {
+        "transforms": {
+            "Risk_Level": {
+                "action": "keep",
+                "semantic_role": "ordered_categorical",
+            },
+        }
+    }
+    violations = validate_semantic_roles(frame_1based, spec)
+    assert any(v["violation"] == "ordinal_not_contiguous" and v["column"] == "Risk_Level" for v in violations)
+
+    # Gaps: {0,2,5}
+    frame_gaps = pd.DataFrame({"Risk_Level": [0, 2, 5, 0]})
+    violations = validate_semantic_roles(frame_gaps, spec)
+    assert any(v["violation"] == "ordinal_not_contiguous" and v["column"] == "Risk_Level" for v in violations)
+
+    # Correct: {0,1,2}
+    frame_ok = pd.DataFrame({"Risk_Level": [0, 1, 2, 0]})
+    violations = validate_semantic_roles(frame_ok, spec)
+    assert not any(v["column"] == "Risk_Level" for v in violations)
+
+
+def test_validate_semantic_roles_catches_inf_in_numeric_continuous():
+    """numeric_continuous with inf/-inf values triggers has_inf."""
+    import numpy as np
+
+    frame = pd.DataFrame({"Income": [1000.0, np.inf, 3000.0, -np.inf]})
+    spec = {
+        "transforms": {
+            "Income": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+            },
+        }
+    }
+    violations = validate_semantic_roles(frame, spec)
+    assert any(v["violation"] == "has_inf" and v["column"] == "Income" for v in violations)
+
+
+def test_escalation_caller_on_repeated_violation(monkeypatch):
+    """When the same (column, violation) pair repeats across attempts,
+    repair_preprocessing_code is called with escalate=True which sets
+    caller='repair-preprocessing-code-escalated'."""
+    captured = {}
+
+    def fake_load_skill_prompt(skill_name):
+        return "repair prompt"
+
+    def fake_codegen_agent(system_prompt, payload, caller="repair-preprocessing-code"):
+        captured["caller"] = caller
+        captured["payload"] = payload
+        return {
+            "code": "def run_preprocessing(raw_df, workspace_path):\n    return raw_df",
+            "entrypoint": "run_preprocessing",
+        }
+
+    monkeypatch.setattr("bt5151_credit_risk.preprocess.load_skill_prompt", fake_load_skill_prompt)
+    monkeypatch.setattr("bt5151_credit_risk.preprocess._call_preprocess_codegen_agent", fake_codegen_agent)
+
+    # Non-escalated call
+    repair_preprocessing_code(
+        previous_generated_code={"code": "...", "entrypoint": "run_preprocessing"},
+        code_review={},
+        execution_log={},
+        validation_report={},
+        dataset_profile={},
+        dataset_policy_spec={},
+        column_transform_spec={},
+        escalate=False,
+    )
+    assert captured["caller"] == "repair-preprocessing-code"
+    assert "escalation_notice" not in captured["payload"]
+
+    # Escalated call
+    repair_preprocessing_code(
+        previous_generated_code={"code": "...", "entrypoint": "run_preprocessing"},
+        code_review={},
+        execution_log={},
+        validation_report={},
+        dataset_profile={},
+        dataset_policy_spec={},
+        column_transform_spec={},
+        escalate=True,
+    )
+    assert captured["caller"] == "repair-preprocessing-code-escalated"
+    assert "escalation_notice" in captured["payload"]

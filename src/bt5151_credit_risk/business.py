@@ -1,4 +1,5 @@
 from bt5151_credit_risk.llm import call_json_response
+from bt5151_credit_risk.skill_prompts import load_skill_prompt
 
 
 def _call_json_agent(system_prompt, payload, caller="business"):
@@ -12,31 +13,34 @@ def explain_risk(
     selected_model_name=None,
     evaluation_metrics=None,
     source_record=None,
+    shap_contributions=None,
+    global_shap_importance=None,
+    analysis_bundle_summary=None,
+    selection_justification=None,
 ):
-    system_prompt = (
-        "You are a credit risk analyst. "
-        "Return only valid JSON with keys: "
-        "predicted_label, risk_level, confidence_band, summary. "
-        "Use risk_level values low, moderate, or high. "
-        "Use confidence_band values low, medium, or high. "
-        "Write the summary for a non-technical business user."
-    )
+    system_prompt = load_skill_prompt("explain-risk")
     payload = {
         "predicted_label": predicted_label,
         "probabilities": probabilities,
         "selected_model_name": selected_model_name,
         "evaluation_metrics": evaluation_metrics,
         "source_record": source_record,
+        "shap_contributions": shap_contributions,
+        "global_shap_importance": global_shap_importance,
+        "selection_justification": selection_justification,
     }
+    if analysis_bundle_summary:
+        payload["analysis_bundle_summary"] = analysis_bundle_summary
     return _call_json_agent(system_prompt, payload, caller="explain-risk")
 
 
 # Turn the explanation into a suggested next action.
 def recommend_action(risk_explanation, prediction_output=None):
     system_prompt = (
-        "You are a credit operations specialist. "
+        "You are a business operations specialist interpreting a classification model's output. "
         "Return only valid JSON with keys: action, reason. "
-        "Choose a concise action code such as manual_review, monitor_account, or standard_handling. "
+        "Choose a concise action code that reflects the appropriate business response to the predicted class "
+        "(e.g., escalate, review, monitor, standard_handling). "
         "Write the reason for a non-technical business user."
     )
     payload = {

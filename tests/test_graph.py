@@ -1,9 +1,12 @@
+import numpy as np
 import pandas as pd
 from langgraph.graph import StateGraph
+from sklearn.ensemble import RandomForestClassifier
+from types import SimpleNamespace
 
 import bt5151_credit_risk.graph as graph_module
-from bt5151_credit_risk.graph import build_graph
-from bt5151_credit_risk.graph import compile_graph
+from bt5151_credit_risk.graph import build_graph, compile_graph, evaluate_models_node, run_inference_node, select_model_node
+from bt5151_credit_risk.state import CreditRiskState
 
 
 class _DeterministicSplitter:
@@ -56,6 +59,12 @@ def _sample_policy_spec():
         "group_column": "Customer_ID",
         "identifier_columns": ["ID", "Name", "SSN"],
         "split_strategy": {"type": "grouped_holdout", "test_size": 0.34},
+        "validation_policy": {
+            "type": "grouped_entity",
+            "group_column": "Customer_ID",
+            "time_column": None,
+            "stratify_target": True,
+        },
         "leakage_rules": {"drop_columns": ["ID", "Name", "SSN"]},
         "imbalance_strategy": {"method": "none"},
         "feature_policy": {"categorical_encoding": "one_hot"},
@@ -64,14 +73,24 @@ def _sample_policy_spec():
 
 def _sample_column_transform_spec():
     return {
-        "columns": {
-            "ID": {"action": "drop"},
-            "Customer_ID": {"action": "drop"},
-            "Name": {"action": "drop"},
-            "SSN": {"action": "drop"},
-            "Credit_Score": {"action": "drop"},
-            "Age": {"action": "keep", "imputation": "median"},
-            "Outstanding_Debt": {"action": "keep", "imputation": "median"},
+        "transforms": {
+            "ID": {"action": "drop", "semantic_role": "identifier"},
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Name": {"action": "drop", "semantic_role": "identifier"},
+            "SSN": {"action": "drop", "semantic_role": "identifier"},
+            "Credit_Score": {"action": "drop", "semantic_role": "target"},
+            "Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "imputation": "median",
+                "representation_intent": "standardized",
+            },
+            "Outstanding_Debt": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "imputation": "median",
+                "representation_intent": "standardized",
+            },
         }
     }
 
@@ -81,15 +100,28 @@ def test_graph_contains_required_nodes():
     assert isinstance(graph, StateGraph)
     expected_nodes = {
         "dataset-policy-spec",
+        "exploratory-data-analysis",
+        "generate-eda-hypotheses",
         "column-transform-spec",
         "generate-preprocessing-code",
         "inspect-preprocessing-code",
         "execute-generated-preprocessing",
         "validate-preprocessing-output",
+        "review-preprocessing-quality",
         "repair-preprocessing-code",
+        "generate-feature-engineering-code",
+        "inspect-feature-engineering-code",
+        "execute-feature-engineering",
+        "validate-feature-engineering",
+        "repair-feature-engineering-code",
         "train-models",
         "evaluate-models",
+        "training-diagnostics",
         "select-model",
+        "global-xai",
+        "local-xai",
+        "interpret-xai-evidence",
+        "package-analysis-bundle",
         "run-inference",
         "explain-risk",
         "recommend-action",
@@ -98,6 +130,25 @@ def test_graph_contains_required_nodes():
     assert "execute-preprocessing" not in graph.nodes
     assert "audit-preprocessing" not in graph.nodes
     assert hasattr(graph.compile(), "invoke")
+
+
+def test_route_after_quality_review_only_accepts_minor_issues_after_retries():
+    state = SimpleNamespace(
+        preprocessing_validation_report={"structural_passed": True, "passed": False},
+        preprocessing_audit_report={
+            "verdict": "needs_repair",
+            "issues": [{"severity": "major", "category": "distribution_sanity"}],
+        },
+        preprocessing_attempt_count=3,
+    )
+
+    assert graph_module._route_after_quality_review(state) == "repair-preprocessing-code"
+
+    state.preprocessing_audit_report = {
+        "verdict": "needs_repair",
+        "issues": [{"severity": "minor", "category": "feature_engineering"}],
+    }
+    assert graph_module._route_after_quality_review(state) == "generate-feature-engineering-code"
 
 
 def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeypatch):
@@ -124,7 +175,7 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
         call_sequence.append("dataset-policy-spec")
         return _sample_policy_spec()
 
-    def fake_generate_column_transform_spec(raw_frame, dataset_policy_spec):
+    def fake_generate_column_transform_spec(raw_frame, dataset_policy_spec, eda_report=None):
         call_sequence.append("column-transform-spec")
         return _sample_column_transform_spec()
 
@@ -164,12 +215,161 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
             "reason": "The predicted risk should be reviewed by a human analyst.",
         }
 
+    def fake_review_preprocessing_quality(execution_result, dataset_policy_spec, column_transform_spec, previous_audit_report=None):
+        call_sequence.append("review-preprocessing-quality")
+        return {
+            "verdict": "pass",
+            "issues": [],
+            "summary": "Synthetic quality review for graph test.",
+        }
+
+    def fake_generate_feature_engineering_code(train_frame, test_frame, feature_columns, dataset_profile, eda_report=None, eda_hypotheses=None):
+        call_sequence.append("generate-feature-engineering-code")
+        # Identity transform — writes train/test through unchanged.
+        code = (
+            "import json\n"
+            "import pandas as pd\n"
+            "from pathlib import Path\n\n"
+            "def engineer_features(train_df, test_df, workspace_path):\n"
+            "    workspace_path = Path(workspace_path)\n"
+            "    train_df.to_csv(workspace_path / 'engineered_train.csv', index=False)\n"
+            "    test_df.to_csv(workspace_path / 'engineered_test.csv', index=False)\n"
+            "    report = {'dropped': [], 'transformed': [], 'added': []}\n"
+            "    (workspace_path / 'feature_engineering_report.json').write_text(json.dumps(report))\n"
+        )
+        return {"code": code, "entrypoint": "engineer_features"}
+
+    def fake_repair_feature_engineering_code(**kwargs):
+        call_sequence.append("repair-feature-engineering-code")
+        return fake_generate_feature_engineering_code(None, None, None, None)
+
     monkeypatch.setattr(graph_module, "generate_dataset_policy_spec", fake_generate_dataset_policy_spec)
     monkeypatch.setattr(graph_module, "generate_column_transform_spec", fake_generate_column_transform_spec)
     monkeypatch.setattr(graph_module, "generate_preprocessing_code", fake_generate_preprocessing_code)
     monkeypatch.setattr(graph_module, "repair_preprocessing_code", fake_repair_preprocessing_code)
+    monkeypatch.setattr(graph_module, "review_preprocessing_quality", fake_review_preprocessing_quality)
+    monkeypatch.setattr(graph_module, "generate_feature_engineering_code", fake_generate_feature_engineering_code)
+    monkeypatch.setattr(graph_module, "repair_feature_engineering_code", fake_repair_feature_engineering_code)
+    def fake_reason_hyperparameter_grids(model_names, train_rows, feature_count, class_distribution, current_metrics):
+        call_sequence.append("reason-hyperparameter-grid")
+        return {"grids": {}, "reasoning": "Test: skip tuning"}
+
+    def fake_tune_models(
+        models,
+        grids,
+        train_frame,
+        train_target,
+        sample_weights=None,
+        validation_policy=None,
+        train_group_values=None,
+        train_time_values=None,
+    ):
+        # Just fit models with defaults, no actual CV.
+        from sklearn.utils.class_weight import compute_sample_weight
+        sw = compute_sample_weight("balanced", train_target) if sample_weights is not None else None
+        assert validation_policy is not None
+        assert validation_policy["type"] == "grouped_entity"
+        assert train_group_values is not None
+        assert len(train_group_values) == len(train_frame)
+        for name, model in models.items():
+            if name == "xgboost" and sw is not None:
+                model.fit(train_frame, train_target, sample_weight=sw)
+            else:
+                model.fit(train_frame, train_target)
+        return models, {}, {}
+
+    def fake_reason_model_selection(evaluation_results, **kwargs):
+        call_sequence.append("reason-model-selection")
+        best_name = max(evaluation_results, key=lambda n: evaluation_results[n]["macro_f1"])
+        return {
+            "model_name": best_name,
+            "justification": "Test: best macro_f1",
+            "hypothesis_validation": "Test: no hypothesis to validate",
+        }
+
+    def fake_extract_learning_curves(model, model_name):
+        return None
+
+    def fake_build_eda_report(df, target_column):
+        call_sequence.append("exploratory-data-analysis")
+        return {
+            "correlations": {"high_pairs": [], "matrix_shape": [2, 2]},
+            "class_separability": {"class_means": {}, "anova_top_features": []},
+            "skewness": {"all": {}, "highly_skewed": {}},
+            "missing_patterns": {"missing_pct": {}, "mnar_suspects": []},
+            "cardinality": {"all": {}, "high_cardinality": []},
+            "top_discriminative_features": [],
+        }
+
+    def fake_generate_eda_hypotheses(eda_report, dataset_profile):
+        call_sequence.append("generate-eda-hypotheses")
+        return {
+            "tested_predictions": [{"hypothesis": "test", "basis": "test", "testable_at": "evaluate-models"}],
+            "supported_conjectures": [],
+            "exploratory_leads": [],
+            "model_selection_prediction": "XGBoost will win",
+            "class_struggle_prediction": "Standard will struggle",
+        }
+
+    def fake_generate_training_diagnostics(**kwargs):
+        call_sequence.append("training-diagnostics")
+        return {
+            "per_class_analysis": {},
+            "capacity_analysis": {},
+            "confidence_analysis": "Synthetic",
+            "hypothesis_validation": {"tested": [], "supported": []},
+            "new_hypotheses": {"tested_predictions": [], "supported_conjectures": [], "exploratory_leads": []},
+        }
+
+    def fake_compute_global_shap(model, model_name, test_frame, feature_columns, class_names, **kwargs):
+        return {"importance": [], "beeswarm_data": {}, "dependence_data": {}}
+
+    def fake_compute_permutation_importance(model, model_name, test_frame, test_target, feature_columns, **kwargs):
+        return {"raw": [], "grouped": []}
+
+    def fake_compute_partial_dependence(*args, **kwargs):
+        return {}
+
+    def fake_compute_ale(*args, **kwargs):
+        return {}
+
+    def fake_compute_shap_contributions_for_case(model, model_name, input_frame, predicted_class_idx, feature_names, **kwargs):
+        return [{"feature": "Age", "shap_value": 0.1, "direction": "positive"}]
+
+    def fake_select_classification_cases(test_frame, test_target, model, class_names, id_to_label):
+        return [
+            {"row_index": int(test_frame.index[0]), "true_label": "Good", "predicted_label": "Good",
+             "probabilities": {"Good": 0.8, "Poor": 0.1, "Standard": 0.1}, "case_type": "representative",
+             "confused_with_class": None},
+        ]
+
+    def fake_interpret_xai_evidence(**kwargs):
+        call_sequence.append("interpret-xai-evidence")
+        return {
+            "observations": ["Fake observation"],
+            "insights": ["Fake insight"],
+            "feature_importance_consensus": {"agreement": [], "interpretation": "Synthetic"},
+            "casebook_analysis": {},
+            "cross_layer_validation": {},
+            "hypotheses": {"tested_predictions": [], "supported_conjectures": [], "exploratory_leads": []},
+        }
+
+    monkeypatch.setattr(graph_module, "reason_hyperparameter_grids", fake_reason_hyperparameter_grids)
+    monkeypatch.setattr(graph_module, "tune_models", fake_tune_models)
+    monkeypatch.setattr(graph_module, "extract_learning_curves", fake_extract_learning_curves)
+    monkeypatch.setattr(graph_module, "reason_model_selection", fake_reason_model_selection)
+    monkeypatch.setattr(graph_module, "build_eda_report", fake_build_eda_report)
     monkeypatch.setattr(graph_module, "explain_risk", fake_explain_risk)
     monkeypatch.setattr(graph_module, "recommend_action", fake_recommend_action)
+    monkeypatch.setattr(graph_module, "generate_eda_hypotheses", fake_generate_eda_hypotheses)
+    monkeypatch.setattr(graph_module, "generate_training_diagnostics", fake_generate_training_diagnostics)
+    monkeypatch.setattr(graph_module, "compute_global_shap", fake_compute_global_shap)
+    monkeypatch.setattr(graph_module, "compute_permutation_importance", fake_compute_permutation_importance)
+    monkeypatch.setattr(graph_module, "compute_partial_dependence", fake_compute_partial_dependence)
+    monkeypatch.setattr(graph_module, "compute_ale", fake_compute_ale)
+    monkeypatch.setattr(graph_module, "compute_shap_contributions_for_case", fake_compute_shap_contributions_for_case)
+    monkeypatch.setattr(graph_module, "select_classification_cases", fake_select_classification_cases)
+    monkeypatch.setattr(graph_module, "interpret_xai_evidence", fake_interpret_xai_evidence)
 
     graph = compile_graph()
     result = graph.invoke(
@@ -186,11 +386,205 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     assert result["full_feature_frame"].equals(pd.read_csv(result["preprocessing_artifacts"]["feature_frame.csv"]))
     assert result["train_frame"].shape[0] > 0
     assert result["test_frame"].shape[0] > 0
+    assert result["train_group_values"] is not None
+    assert result["test_group_values"] is not None
+    assert len(result["train_group_values"]) == len(result["train_frame"])
+    assert len(result["test_group_values"]) == len(result["test_frame"])
     assert result["feature_columns"] == ["Age", "Outstanding_Debt"]
     assert result["class_names"] == ["Good", "Poor", "Standard"]
     assert result["label_to_id"] == {"Good": 0, "Poor": 1, "Standard": 2}
     assert result["id_to_label"] == {0: "Good", 1: "Poor", 2: "Standard"}
-    assert result["selected_model_name"] in {"logistic_regression", "random_forest"}
+    assert result["selected_model_name"] in {"logistic_regression", "random_forest", "xgboost"}
     assert result["prediction_output"]["predicted_label"] in {"Good", "Standard", "Poor"}
     assert result["risk_explanation"]["summary"] == "Synthetic explanation for graph test."
     assert result["recommended_action"]["action"] == "manual_review"
+    # New XAI overhaul assertions
+    assert result["eda_hypotheses"] is not None
+    assert result["eda_hypotheses"]["model_selection_prediction"] == "XGBoost will win"
+    assert result["training_diagnostics"] is not None
+    assert result["global_xai_results"] is not None
+    assert "methods_used" in result["global_xai_results"]
+    assert result["local_xai_cases"] is not None
+    assert len(result["local_xai_cases"]) >= 1
+    assert result["analysis_bundle"] is not None
+    assert result["analysis_bundle_summary"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Focused tests for select_model_node SHAP recomputation
+# ---------------------------------------------------------------------------
+
+def _build_select_model_state(trained_models, test_frame, test_target, feature_columns, class_names):
+    """Build a minimal CreditRiskState for testing select_model_node."""
+    return CreditRiskState(
+        raw_dataset_path="dummy.csv",
+        trained_models=trained_models,
+        test_frame=test_frame,
+        test_target=test_target,
+        feature_columns=feature_columns,
+        class_names=class_names,
+        id_to_label={i: c for i, c in enumerate(class_names)},
+        label_to_id={c: i for i, c in enumerate(class_names)},
+        evaluation_results={
+            name: {"macro_f1": 0.8 - i * 0.05, "weighted_f1": 0.8 - i * 0.05, "accuracy": 0.8}
+            for i, name in enumerate(trained_models)
+        },
+    )
+
+
+def test_select_model_recomputes_shap_when_llm_picks_different_model(monkeypatch):
+    """When the LLM selects a model different from metric-best, SHAP must be
+    recomputed for the selected model via compute_global_shap."""
+    rng = np.random.RandomState(42)
+    n = 50
+    X = pd.DataFrame({"f1": rng.randn(n), "f2": rng.randn(n)})
+    y = pd.Series(np.where(X["f1"] > 0, 1, 0))
+
+    rf = RandomForestClassifier(n_estimators=5, random_state=42, n_jobs=-1)
+    rf.fit(X, y)
+    rf2 = RandomForestClassifier(n_estimators=5, random_state=99, n_jobs=-1)
+    rf2.fit(X, y)
+
+    state = _build_select_model_state(
+        trained_models={"random_forest": rf, "xgboost": rf2},
+        test_frame=X, test_target=y,
+        feature_columns=["f1", "f2"], class_names=["c0", "c1"],
+    )
+
+    # LLM selects xgboost (not the metric-best random_forest)
+    def fake_reason_model_selection(**kwargs):
+        return {"model_name": "xgboost", "justification": "test override"}
+
+    recompute_calls = []
+    original_compute_global_shap = graph_module.compute_global_shap
+
+    def tracking_compute_global_shap(model, model_name, *args, **kwargs):
+        recompute_calls.append(model_name)
+        return original_compute_global_shap(model, model_name, *args, **kwargs)
+
+    monkeypatch.setattr(graph_module, "reason_model_selection", fake_reason_model_selection)
+    monkeypatch.setattr(graph_module, "compute_global_shap", tracking_compute_global_shap)
+
+    result = select_model_node(state)
+
+    assert result["selected_model_name"] == "xgboost"
+    # compute_global_shap must have been called for "xgboost" (the selected model)
+    assert "xgboost" in recompute_calls, (
+        f"Expected SHAP recomputation for 'xgboost', got calls for: {recompute_calls}"
+    )
+    assert len(result["global_shap_importance"]) > 0
+
+
+def test_select_model_retries_shap_when_initial_fails(monkeypatch):
+    """When initial SHAP fails for metric-best, it must retry for the selected model."""
+    rng = np.random.RandomState(42)
+    n = 50
+    X = pd.DataFrame({"f1": rng.randn(n), "f2": rng.randn(n)})
+    y = pd.Series(np.where(X["f1"] > 0, 1, 0))
+
+    rf = RandomForestClassifier(n_estimators=5, random_state=42, n_jobs=-1)
+    rf.fit(X, y)
+
+    state = _build_select_model_state(
+        trained_models={"random_forest": rf},
+        test_frame=X, test_target=y,
+        feature_columns=["f1", "f2"], class_names=["c0", "c1"],
+    )
+
+    def fake_reason_model_selection(**kwargs):
+        return {"model_name": "random_forest", "justification": "only model"}
+
+    recompute_calls = []
+    original_compute_global_shap = graph_module.compute_global_shap
+
+    def tracking_compute_global_shap(model, model_name, *args, **kwargs):
+        recompute_calls.append(model_name)
+        return original_compute_global_shap(model, model_name, *args, **kwargs)
+
+    # Force initial SHAP (the inline try block) to fail by breaking shap import
+    import shap as shap_module
+    original_tree = shap_module.TreeExplainer
+
+    def broken_tree(*args, **kwargs):
+        raise RuntimeError("Simulated SHAP failure")
+
+    monkeypatch.setattr(shap_module, "TreeExplainer", broken_tree)
+    monkeypatch.setattr(graph_module, "reason_model_selection", fake_reason_model_selection)
+    monkeypatch.setattr(graph_module, "compute_global_shap", tracking_compute_global_shap)
+
+    result = select_model_node(state)
+
+    assert result["selected_model_name"] == "random_forest"
+    # The retry path must have been triggered (compute_global_shap called)
+    assert "random_forest" in recompute_calls, (
+        f"Expected SHAP retry for 'random_forest', got calls for: {recompute_calls}"
+    )
+
+
+class _ColumnCheckingModel:
+    def __init__(self, expected_columns, predicted_class=0):
+        self.expected_columns = expected_columns
+        self.predicted_class = predicted_class
+
+    def predict(self, frame):
+        assert list(frame.columns) == self.expected_columns
+        return np.array([self.predicted_class] * len(frame))
+
+    def predict_proba(self, frame):
+        assert list(frame.columns) == self.expected_columns
+        rows = len(frame)
+        return np.tile(np.array([[0.8, 0.1, 0.1]]), (rows, 1))
+
+
+def test_evaluate_models_uses_model_specific_test_views():
+    state = SimpleNamespace(
+        trained_models={
+            "logistic_regression": _ColumnCheckingModel(["lin_a", "lin_b"], predicted_class=0),
+            "xgboost": _ColumnCheckingModel(["tree_x"], predicted_class=0),
+        },
+        test_frame=pd.DataFrame({"tree_x": [1.0, 2.0]}),  # legacy/default frame
+        test_views={
+            "linear_view": pd.DataFrame({"lin_a": [0.1, 0.2], "lin_b": [1.0, 1.1]}),
+            "tree_view": pd.DataFrame({"tree_x": [1.0, 2.0]}),
+        },
+        model_view_map={
+            "logistic_regression": "linear_view",
+            "xgboost": "tree_view",
+        },
+        test_target=pd.Series([0, 0]),
+        class_names=["c0", "c1", "c2"],
+    )
+
+    result = evaluate_models_node(state)
+    assert set(result["evaluation_results"]) == {"logistic_regression", "xgboost"}
+
+
+def test_run_inference_uses_selected_model_full_view(monkeypatch):
+    monkeypatch.setattr(
+        graph_module,
+        "compute_shap_contributions_for_case",
+        lambda model, model_name, input_frame, predicted_code, feature_columns, top_n=5: [
+            {"feature": feature_columns[0], "shap_value": 0.4, "direction": "positive"}
+        ],
+    )
+
+    state = SimpleNamespace(
+        inference_input={"row_index": 7},
+        selected_model_name="logistic_regression",
+        trained_models={"logistic_regression": _ColumnCheckingModel(["lin_a", "lin_b"], predicted_class=0)},
+        full_feature_frame=pd.DataFrame({"tree_x": [9.0]}, index=[7]),  # legacy/default frame
+        full_feature_frames_by_view={
+            "linear_view": pd.DataFrame({"lin_a": [0.5], "lin_b": [1.5]}, index=[7]),
+            "tree_view": pd.DataFrame({"tree_x": [9.0]}, index=[7]),
+        },
+        model_view_map={"logistic_regression": "linear_view"},
+        feature_columns=["tree_x"],
+        feature_columns_by_view={"linear_view": ["lin_a", "lin_b"], "tree_view": ["tree_x"]},
+        id_to_label={0: "Good", 1: "Poor", 2: "Standard"},
+        evaluation_results={"logistic_regression": {"macro_f1": 0.7}},
+        raw_frame=pd.DataFrame({"Customer_ID": ["CUS_A"]}, index=[7]),
+    )
+
+    result = run_inference_node(state)
+    assert result["prediction_output"]["predicted_label"] == "Good"
+    assert result["prediction_output"]["shap_contributions"][0]["feature"] == "lin_a"

@@ -15,3 +15,21 @@ credit_score_cleaned.xlsx
 credit_score_model_ready.csv
 credit_score_model_ready.xlsx
 generated_preprocessing_runs/
+feature_engineering_runs/
+logs/
+
+# Local tool configs
+.codex
+
+# Pipeline run artifacts
+analysis_bundle_*.json
+
+# Windows/WSL metadata
+*:Zone.Identifier
+
+# Scratch files
+test.ipynb
+can you check log.md
+credit-rik-improving log.md
+credit-risk-improving.ipynb
+XAI Case Study/

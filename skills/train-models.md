@@ -1,6 +1,6 @@
 ---
 name: train-models
-description: Train and record candidate multi-class credit risk models on the prepared dataset.
+description: Train and record candidate multi-class models on the prepared dataset.
 ---
 
 ## When to use

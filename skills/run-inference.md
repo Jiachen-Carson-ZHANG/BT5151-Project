@@ -1,6 +1,6 @@
 ---
 name: run-inference
-description: Score a new customer-month record with the selected credit risk model.
+description: Score a new input record with the selected trained model.
 ---
 
 ## When to use
