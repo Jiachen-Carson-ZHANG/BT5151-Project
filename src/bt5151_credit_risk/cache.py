@@ -68,14 +68,21 @@ CACHE_KEYS = [
     # Dataset metadata
     "dataset_profile",
     "eda_report",
+    # Run provenance
+    "run_id",
+    "cache_log_path",
+    "cache_bundle_path",
+    "cache_saved_at",
 ]
 
 
-def save_cache(result: dict, compress: int = 3) -> Path:
+def save_cache(result: dict, metadata: dict | None = None, compress: int = 3) -> Path:
     """Serialize pipeline state to CACHE_FILE.
 
     Args:
         result: Dict returned by compiled.invoke() or accumulated from stream.
+        metadata: Optional provenance metadata (cache_log_path, cache_bundle_path,
+            cache_saved_at) to merge into the stored payload.
         compress: joblib compress level (0-9); 3 is a good speed/size balance.
 
     Returns:
@@ -83,6 +90,9 @@ def save_cache(result: dict, compress: int = 3) -> Path:
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     payload = {k: result.get(k) for k in CACHE_KEYS}
+    if metadata:
+        for k, v in metadata.items():
+            payload[k] = v
     # Log what's present and what's missing so the user knows what will work.
     present = [k for k in CACHE_KEYS if payload[k] is not None]
     missing = [k for k in CACHE_KEYS if payload[k] is None]

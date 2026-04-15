@@ -72,6 +72,9 @@ def test_state_has_expected_keys():
     assert state.local_xai_interpretation is None
     assert state.analysis_bundle is None
     assert state.analysis_bundle_summary is None
+    assert state.cache_log_path is None
+    assert state.cache_bundle_path is None
+    assert state.cache_saved_at is None
 
 
 def test_state_accepts_new_preprocessing_fields():

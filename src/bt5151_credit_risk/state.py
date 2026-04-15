@@ -48,6 +48,7 @@ class CreditRiskState(BaseModel):
     test_target: Any | None = None
     feature_columns_by_view: dict | None = None
     model_view_map: dict | None = None
+    deferred_categorical_columns: dict | None = None  # {col: nunique} for object-dtype preprocess outputs
     train_group_values: list | None = None
     test_group_values: list | None = None
     train_time_values: list | None = None
@@ -67,6 +68,9 @@ class CreditRiskState(BaseModel):
     local_xai_interpretation: dict | None = None
     analysis_bundle: dict | None = None
     analysis_bundle_summary: dict | None = None
+    cache_log_path: str | None = None
+    cache_bundle_path: str | None = None
+    cache_saved_at: str | None = None
     inference_input: dict | None = None
     prediction_output: dict | None = None
     risk_explanation: dict | None = None
