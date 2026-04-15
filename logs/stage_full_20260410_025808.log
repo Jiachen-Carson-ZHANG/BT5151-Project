@@ -1,0 +1,90 @@
+02:58:08 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/logs/stage_full_20260410_025808.log
+02:58:11 INFO    run_stage  === Full pipeline (row_index=42) ===
+02:58:11 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+02:58:12 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+02:58:16 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=145 duration=3.09s
+02:58:16 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'leakage_policy', 'imbalance_policy']
+02:58:16 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+02:58:16 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+02:58:30 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o input_tokens=8077 output_tokens=1254 duration=13.67s
+02:58:30 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms']
+02:58:30 INFO    bt5151_credit_risk.graph  >>> generate-preprocessing-code
+02:58:52 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=11016 output_tokens=1924 duration=20.78s
+02:58:52 INFO    bt5151_credit_risk.graph      entrypoint: run_preprocessing, code length: 6006 chars
+02:58:52 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 1/5)
+02:58:52 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+02:58:52 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+02:59:53 INFO    bt5151_credit_risk.graph      returncode: None, timed_out: True, success: False
+02:59:53 WARNING bt5151_credit_risk.graph      subprocess stderr:
+b'/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_19f5c38380a0423c85a004c01e9d1ddf/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.\n  raw_df = pd.read_csv(raw_frame_path)\n'
+02:59:53 WARNING bt5151_credit_risk.graph      missing artifacts: ['target.csv', 'split_manifest.json', 'preprocessing_report.json']
+02:59:53 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+03:00:21 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': False}
+03:00:21 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_19f5c38380a0423c85a004c01e9d1ddf/split_manifest.json.
+03:00:21 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_19f5c38380a0423c85a004c01e9d1ddf/target.csv.
+03:00:21 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+03:00:21 WARNING bt5151_credit_risk.graph      quality warning: [high_feature_count] Feature frame has 6312 columns — possible cardinality explosion from encoding. Consider using label encoding or grouping rare categories for high-cardinality columns.
+03:00:21 WARNING bt5151_credit_risk.graph      quality warning: [constant_features] 4562 constant feature(s) detected: ['Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Auto Loan, Credit-Builder Loan, Credit-Builder Loan, Mortgage Loan, and Personal Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Auto Loan, Student Loan, and Student Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Credit-Builder Loan, Payday Loan, Not Specified, Payday Loan, Student Loan, and Debt Consolidation Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Not Specified, Debt Consolidation Loan, and Credit-Builder Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Not Specified, and Home Equity Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, Personal Loan, Student Loan, and Not Specified', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, and Debt Consolidation Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Auto Loan, and Student Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Credit-Builder Loan, and Home Equity Loan', 'Type_of_Loan_Auto Loan, Auto Loan, Credit-Builder Loan, and Personal Loan']. These add no predictive value.
+03:00:21 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+03:00:21 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+03:00:21 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 1/5)
+03:00:21 ERROR   run_stage  Pipeline failed
+Traceback (most recent call last):
+  File "/home/tough/BT5151 GroupProject/run_stage.py", line 176, in run_full
+    result = graph.invoke({
+             ^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 3309, in invoke
+    for chunk in self.stream(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 2736, in stream
+    for _ in runner.tick(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/src/bt5151_credit_risk/graph.py", line 244, in repair_preprocessing_code_node
+    repaired_code = repair_preprocessing_code(
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/src/bt5151_credit_risk/preprocess.py", line 115, in repair_preprocessing_code
+    return _call_preprocess_codegen_agent(system_prompt, payload, caller="repair-preprocessing-code")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/src/bt5151_credit_risk/preprocess.py", line 20, in _call_preprocess_codegen_agent
+    return call_json_response(system_prompt, payload, caller=caller)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/src/bt5151_credit_risk/llm.py", line 84, in call_json_response
+    input=json.dumps(payload, ensure_ascii=True, indent=2),
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/__init__.py", line 238, in dumps
+    **kw).encode(obj)
+          ^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/encoder.py", line 202, in encode
+    chunks = list(chunks)
+             ^^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/encoder.py", line 432, in _iterencode
+    yield from _iterencode_dict(o, _current_indent_level)
+  File "/usr/lib/python3.12/json/encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "/usr/lib/python3.12/json/encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "/usr/lib/python3.12/json/encoder.py", line 439, in _iterencode
+    o = _default(o)
+        ^^^^^^^^^^^
+  File "/usr/lib/python3.12/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type bytes is not JSON serializable
+During task with name 'repair-preprocessing-code' and id '21086120-693b-6aa3-03ee-8acc67436d03'
+03:00:21 INFO    run_stage  Stage 'full' completed in 132.9s
+03:00:21 INFO    run_stage  --- Token usage summary ---
+03:00:21 INFO    run_stage  Total LLM calls: 3
+03:00:21 INFO    run_stage  Total tokens: 26569 (input: 23246, output: 3323)
+03:00:21 INFO    run_stage  Total LLM duration: 37.54s
+03:00:21 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4153 out=145 3.09s
+03:00:21 INFO    run_stage    [column-transform-spec] model=gpt-4o in=8077 out=1254 13.67s
+03:00:21 INFO    run_stage    [generate-preprocessing-code] model=gpt-4o in=11016 out=1924 20.78s
+03:00:21 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_full_20260410_025808.log

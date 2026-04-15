@@ -1,0 +1,225 @@
+18:42:31 INFO    run_stage  Stage: spec | Log file: /home/tough/BT5151 GroupProject/logs/stage_spec_20260407_184231.log
+18:42:33 INFO    run_stage  Loaded 100000 rows x 28 columns from /home/tough/BT5151 GroupProject/train.csv
+18:42:33 INFO    run_stage  --- dataset-policy-spec ---
+18:42:37 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=145 duration=3.72s
+18:42:37 INFO    run_stage  Policy spec:
+{
+  "task_type": "multiclass_classification",
+  "target_column": "Credit_Score",
+  "group_column": "Customer_ID",
+  "identifier_columns": [
+    "ID",
+    "Customer_ID",
+    "SSN",
+    "Name"
+  ],
+  "split_strategy": {
+    "type": "grouped_holdout",
+    "test_size": 0.2,
+    "group_column": "Customer_ID"
+  },
+  "leakage_policy": {
+    "columns_to_drop": [
+      "ID",
+      "Customer_ID",
+      "SSN",
+      "Name"
+    ]
+  },
+  "imbalance_policy": {
+    "apply_imbalance_policy": false,
+    "strategy": null
+  }
+}
+18:42:38 INFO    run_stage  Profile (with target):
+{
+  "row_count": 100000,
+  "target_distribution": {
+    "Standard": 53174,
+    "Poor": 28998,
+    "Good": 17828
+  }
+}
+18:42:38 INFO    run_stage  --- column-transform-spec ---
+18:42:46 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o input_tokens=2835 output_tokens=1110 duration=7.98s
+18:42:46 INFO    run_stage  Column transform spec:
+{
+  "transforms": {
+    "ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Customer_ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Name": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Age": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "SSN": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Occupation": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Annual_Income": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Monthly_Inhand_Salary": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Bank_Accounts": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Card": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Interest_Rate": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Loan": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Type_of_Loan": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "label"
+    },
+    "Delay_from_due_date": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Delayed_Payment": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Changed_Credit_Limit": {
+      "action": "keep",
+      "cleaning": "replace '_' with NaN, convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Inquiries": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Mix": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Outstanding_Debt": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Utilization_Ratio": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_History_Age": {
+      "action": "keep",
+      "cleaning": "extract total months",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_of_Min_Amount": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Total_EMI_per_month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Amount_invested_monthly": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_Behaviour": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "label"
+    },
+    "Monthly_Balance": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Score": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    }
+  }
+}
+18:42:46 INFO    run_stage  Stage 'spec' completed in 14.8s
+18:42:46 INFO    run_stage  --- Token usage summary ---
+18:42:46 INFO    run_stage  Total LLM calls: 2
+18:42:46 INFO    run_stage  Total tokens: 8243 (input: 6988, output: 1255)
+18:42:46 INFO    run_stage  Total LLM duration: 11.70s
+18:42:46 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4153 out=145 3.72s
+18:42:46 INFO    run_stage    [column-transform-spec] model=gpt-4o in=2835 out=1110 7.98s
+18:42:46 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_spec_20260407_184231.log

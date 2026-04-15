@@ -1,0 +1,475 @@
+01:04:59 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/logs/stage_full_20260415_010459.log
+01:05:02 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===
+01:05:02 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+01:05:03 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+01:05:08 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4377 output_tokens=179 duration=4.55s
+01:05:08 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'validation_policy', 'leakage_policy', 'imbalance_policy']
+01:05:09 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+01:05:09 INFO    bt5151_credit_risk.graph  >>> exploratory-data-analysis
+01:05:15 INFO    bt5151_credit_risk.graph      top discriminative features (mutual information):
+01:05:15 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: MI=0.5471
+01:05:15 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: MI=0.5187
+01:05:15 INFO    bt5151_credit_risk.graph        Interest_Rate: MI=0.1705
+01:05:15 INFO    bt5151_credit_risk.graph        Delay_from_due_date: MI=0.1215
+01:05:15 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: MI=0.1114
+01:05:15 INFO    bt5151_credit_risk.graph        Num_Credit_Card: MI=0.1048
+01:05:15 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: MI=0.0995
+01:05:15 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: MI=0.0000
+01:05:15 INFO    bt5151_credit_risk.graph      highly skewed columns (|skew| > 2): 5
+01:05:15 INFO    bt5151_credit_risk.graph      high-cardinality categoricals (>20 unique):
+01:05:15 INFO    bt5151_credit_risk.graph        ID: 100000 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Monthly_Balance: 98792 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: 91049 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Annual_Income: 18940 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 13178 unique
+01:05:15 INFO    bt5151_credit_risk.graph        SSN: 12501 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Customer_ID: 12500 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Name: 10139 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Type_of_Loan: 6260 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: 4384 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Age: 1788 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: 749 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Num_of_Loan: 434 unique
+01:05:15 INFO    bt5151_credit_risk.graph        Credit_History_Age: 404 unique
+01:05:15 INFO    bt5151_credit_risk.graph      MNAR suspects (missingness correlates with target): 1
+01:05:15 INFO    bt5151_credit_risk.graph        Type_of_Loan: 11.4% missing, target dist diff=0.1951
+01:05:15 INFO    bt5151_credit_risk.graph      ANOVA top-5 features:
+01:05:15 INFO    bt5151_credit_risk.graph        Delay_from_due_date: F=11471.89 p=0.000000
+01:05:15 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: F=1903.07 p=0.000000
+01:05:15 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: F=105.30 p=0.000000
+01:05:15 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: F=6.26 p=0.001921
+01:05:15 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: F=5.50 p=0.004072
+01:05:15 INFO    bt5151_credit_risk.graph  >>> generate-eda-hypotheses
+01:05:58 INFO    bt5151_credit_risk.llm  LLM call [generate-eda-hypotheses] model=o4-mini input_tokens=3995 output_tokens=4134 duration=43.49s
+01:05:58 INFO    bt5151_credit_risk.graph      tested predictions: 3
+01:05:58 INFO    bt5151_credit_risk.graph        [tested] XGBoost will outperform Logistic Regression by ≥4pp macro_f1 because Total_EMI_per_month has mutual_information=0.5471 but F_statistic=1.04, indicatin
+01:05:58 INFO    bt5151_credit_risk.graph        [tested] Total_EMI_per_month will rank #1 in global SHAP with mean |SHAP| ≥1.3× the SHAP value of Monthly_Inhand_Salary because its MI=0.5471 slightly exceeds 
+01:05:58 INFO    bt5151_credit_risk.graph        [tested] Monthly_Inhand_Salary will occupy a top-2 position by absolute coefficient magnitude in Logistic Regression because it has the highest F_statistic=190
+01:05:58 INFO    bt5151_credit_risk.graph      supported conjectures: 2
+01:05:58 INFO    bt5151_credit_risk.graph        [supported] Standard will have the lowest recall (≤0.75) because its class_means on Monthly_Inhand_Salary (4242 between Good 5389 and Poor 3375) and Delay_from_du
+01:05:58 INFO    bt5151_credit_risk.graph        [supported] Credit_Utilization_Ratio will rank beyond top-15 in global SHAP for both LR and XGBoost since MI=0.0 and F_statistic=105.3 indicate near-zero discrimi
+01:05:58 INFO    bt5151_credit_risk.graph      exploratory leads: 1
+01:05:58 INFO    bt5151_credit_risk.graph        [exploratory] The ratio Total_EMI_per_month/Monthly_Inhand_Salary may achieve MI>0.60 and boost macro_f1 by ≥1pp because EMI shows high nonlinear signal (MI=0.5471,
+01:05:58 INFO    bt5151_credit_risk.graph      model selection prediction: XGBoost will achieve macro_f1 ≥0.76, outperforming Logistic Regression by ≥4pp because the high MI nonlinear signal in Total_EMI_per_month (0.5471 MI vs F=1.04) and uncorrelated features favor tree-based splits
+01:05:58 INFO    bt5151_credit_risk.graph      class struggle prediction: Standard will have the lowest recall (≤0.75) with Standard→Good as the dominant confusion due to its intermediate means on Delay_from_due_date and Monthly_Inhand_Salary creating a tighter boundary with Good
+01:05:58 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+01:07:07 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=o4-mini input_tokens=10072 output_tokens=7216 duration=67.97s
+01:07:07 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms', 'reasoning']
+01:07:07 INFO    bt5151_credit_risk.graph      col ID                        action=drop  
+01:07:07 INFO    bt5151_credit_risk.graph      col Customer_ID               action=drop  
+01:07:07 INFO    bt5151_credit_risk.graph      col Month                     action=keep  map month name to integer 1-12
+01:07:07 INFO    bt5151_credit_risk.graph      col Name                      action=drop  
+01:07:07 INFO    bt5151_credit_risk.graph      col Age                       action=keep  extract digits, convert to int, clip to [18,100]
+01:07:07 INFO    bt5151_credit_risk.graph      col SSN                       action=drop  
+01:07:07 INFO    bt5151_credit_risk.graph      col Occupation                action=keep  map '_______' to NaN, one_hot
+01:07:07 INFO    bt5151_credit_risk.graph      col Annual_Income             action=keep  convert to float
+01:07:07 INFO    bt5151_credit_risk.graph      col Monthly_Inhand_Salary     action=keep  clip to [300,15000]
+01:07:07 INFO    bt5151_credit_risk.graph      col Num_Bank_Accounts         action=keep  clip to [0,50]
+01:07:07 INFO    bt5151_credit_risk.graph      col Num_Credit_Card           action=keep  clip to [0,100]
+01:07:07 INFO    bt5151_credit_risk.graph      col Interest_Rate             action=keep  clip to [1,100]
+01:07:07 INFO    bt5151_credit_risk.graph      col Num_of_Loan               action=keep  remove non-digits, convert to int, clip to [0,10]
+01:07:07 INFO    bt5151_credit_risk.graph      col Type_of_Loan              action=keep  split on ',' and 'and', strip whitespace, treat 'Not Specified' and NaN as empty, multi_hot
+01:07:07 INFO    bt5151_credit_risk.graph      col Delay_from_due_date       action=keep  clip to [0,61]
+01:07:07 INFO    bt5151_credit_risk.graph      col Num_of_Delayed_Payment    action=keep  remove non-digits, convert to int, clip to [0,20]
+01:07:07 INFO    bt5151_credit_risk.graph      col Changed_Credit_Limit      action=keep  map '_' to NaN, convert to float, clip to [0,10000]
+01:07:07 INFO    bt5151_credit_risk.graph      col Num_Credit_Inquiries      action=keep  clip to [0,100]
+01:07:07 INFO    bt5151_credit_risk.graph      col Credit_Mix                action=keep  map '_' to NaN, one_hot
+01:07:07 INFO    bt5151_credit_risk.graph      col Outstanding_Debt          action=keep  convert to float
+01:07:07 INFO    bt5151_credit_risk.graph      col Credit_Utilization_Ratio  action=keep  clip to [20,50]
+01:07:07 INFO    bt5151_credit_risk.graph      col Credit_History_Age        action=keep  extract years and months, convert to total months
+01:07:07 INFO    bt5151_credit_risk.graph      col Payment_of_Min_Amount     action=keep  map {'Yes':1,'No':0,'NM':NaN}
+01:07:07 INFO    bt5151_credit_risk.graph      col Total_EMI_per_month       action=keep  clip to [0,60000]
+01:07:07 INFO    bt5151_credit_risk.graph      col Amount_invested_monthly   action=keep  remove non-numeric chars, convert to float, clip to [0,10000]
+01:07:07 INFO    bt5151_credit_risk.graph      col Payment_Behaviour         action=keep  map invalid patterns to NaN, one_hot
+01:07:07 INFO    bt5151_credit_risk.graph      col Monthly_Balance           action=keep  map values enclosed in '__' to NaN, remove non-numeric chars, convert to float, clip to [0,10000]
+01:07:07 INFO    bt5151_credit_risk.graph      col Credit_Score              action=drop  
+01:07:07 INFO    bt5151_credit_risk.graph      column-transform reasoning:
+01:07:07 INFO    bt5151_credit_risk.graph        ID: Identifier per policy, high cardinality (100k unique), dropped
+01:07:07 INFO    bt5151_credit_risk.graph        Customer_ID: Group key for grouped holdout, semantic_role group_identifier, dropped from features
+01:07:07 INFO    bt5151_credit_risk.graph        Month: Temporal feature with 8 distinct month names; decomposed to month number 1–12
+01:07:07 INFO    bt5151_credit_risk.graph        Name: Identifier per policy, high cardinality (~10k unique plus NaNs), dropped
+01:07:07 INFO    bt5151_credit_risk.graph        Age: Numeric_continuous: string with errors ('-500','28_'), top 10 values 25–38; extract digits, clip [18,100], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        SSN: Identifier per policy, high cardinality (12.5k unique, many invalids), dropped
+01:07:07 INFO    bt5151_credit_risk.graph        Occupation: Unordered_categorical with 16 categories, placeholder '_______' appears 7k×; one-hot after mapping to NaN, mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Annual_Income: Numeric_continuous stored as string, high cardinality (18.9k); convert to float, median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: Numeric_continuous (float64), p1=531.9,p99=13814.9,max=15204.6; clip [300,15000], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: Numeric_count, negative and extreme outliers (min=-1,p99=445,max=1798); clip [0,50], mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Num_Credit_Card: Numeric_count, p1=1,p99=849,max=1499; clip [0,100], mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Interest_Rate: Numeric_continuous, unrealistic tail (p99=2865,max=5797); clip to [1,100], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Num_of_Loan: Numeric_count stored as string, includes '-100'; remove non-digits, clip [0,10], mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Type_of_Loan: Multi_value_set with comma/'and' delimiting, 6.2k unique, 11% MNAR; binary_membership multi-hot, empty for NaN/'Not Spec
+01:07:07 INFO    bt5151_credit_risk.graph        Delay_from_due_date: Numeric_continuous, days late, min=-5,p99=61; clip [0,61], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: Numeric_count stored as string, top values 9–20, NaN=7k; parse digits, clip [0,20], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: Numeric_continuous stored as string with '_' placeholder (2k×); map '_'→NaN, convert, clip [0,10000], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: Numeric_count, p99=1109,max=2597; clip [0,100], mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Credit_Mix: Unordered_categorical 4 levels incl '_' (20k×); map '_'→NaN, one-hot, mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Outstanding_Debt: Numeric_continuous stored as string, high cardinality (13.1k); convert to float, median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: Numeric_continuous (float64), valid range [20,50], p1=22.7,p99=42.4; clip [20,50], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Credit_History_Age: Numeric_continuous duration stored as 'Y years and M months', many NaNs (9k×); parse to total months, median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Payment_of_Min_Amount: Binary_flag with values Yes/No/NM (NM=12k missing codes); map Yes→1,No→0,NM→NaN, mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: Numeric_continuous, p99=56125,max=82331; clip [0,60000], median impute
+01:07:07 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: Numeric_continuous stored as string, high cardinality (91k), includes '__10000__'; clean non-numeric, clip [0,10000], me
+01:07:07 INFO    bt5151_credit_risk.graph        Payment_Behaviour: Unordered_categorical 7 levels incl invalid '!@9#%8' (7.6k×); map invalid→NaN, one-hot, mode impute
+01:07:07 INFO    bt5151_credit_risk.graph        Monthly_Balance: Numeric_continuous stored as string, high cardinality (98.7k), contains '__-333…__'; map those→NaN, clean, clip [0,10000
+01:07:07 INFO    bt5151_credit_risk.graph        Credit_Score: Target for multiclass classification per policy, dropped from features
+01:07:07 INFO    bt5151_credit_risk.graph  >>> generate-preprocessing-code
+01:07:32 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=13294 output_tokens=2560 duration=24.56s
+01:07:32 INFO    bt5151_credit_risk.graph      entrypoint: run_preprocessing, code length: 7853 chars
+01:07:32 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 1/5)
+01:07:32 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+01:07:32 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+01:07:40 INFO    bt5151_credit_risk.graph      returncode: 1, timed_out: False, success: False
+01:07:40 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+Traceback (most recent call last):
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/_execute_generated_preprocessing.py", line 28, in <module>
+    main()
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/_execute_generated_preprocessing.py", line 22, in main
+    result = entrypoint(raw_df, workspace_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/generated_preprocessing.py", line 85, in run_preprocessing
+    df['Credit_History_Age'] = (years * 12 + months).fillna(df['Credit_History_Age'].median())
+                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/util/_decorators.py", line 336, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/series.py", line 8196, in median
+    return NDFrame.median(
+           ^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/generic.py", line 11843, in median
+    return self._stat_function(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/generic.py", line 11785, in _stat_function
+    return self._reduce(
+           ^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-package
+01:07:40 WARNING bt5151_credit_risk.graph      missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+01:07:40 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+01:07:40 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': False, 'target_excluded': False, 'feature_frame_non_empty': False, 'group_overlap_zero': False}
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/split_manifest.json.
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/target.csv.
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_005a110d66794d0d9cd4b75a7c57ae5b/feature_frame.csv.
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+01:07:40 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+01:07:40 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+01:07:40 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+01:07:40 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 1/5)
+01:08:33 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=8593 output_tokens=5324 duration=53.66s
+01:08:33 WARNING bt5151_credit_risk.llm  JSON parse failed (attempt 1/3): Extra data: line 1 column 9299 (char 9298)
+Raw output (first 500 chars): {"code":"import json\nimport pandas as pd\nimport numpy as np\nfrom pathlib import Path\nfrom sklearn.model_selection import GroupShuffleSplit\n\ndef run_preprocessing(raw_df, workspace_path):\n    workspace_path = Path(workspace_path)\n    df = raw_df.copy()\n\n    # Step 2: Extract target FIRST\n    target = df['Credit_Score'].copy()\n\n    # Step 3: Drop columns\n    df = df.drop(columns=['ID', 'Customer_ID', 'Name', 'SSN', 'Credit_Score'])\n\n    # Step 4: Clean and impute each kept column\n
+01:10:11 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=8593 output_tokens=8952 duration=97.34s
+01:10:11 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 2/5)
+01:10:11 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+01:10:11 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+01:10:27 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+01:10:27 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37bbf163c0f48efb8f8379125837840/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+01:10:27 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+01:10:28 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+01:10:28 WARNING bt5151_credit_risk.graph      quality warning: [constant_features] 1 constant feature(s) detected: ['Credit_History_Age']. These add no predictive value.
+01:10:28 WARNING bt5151_credit_risk.graph      role violation: [missing] Type_of_Loan (role=multi_value_set) — column was dropped despite action=keep, or was renamed without updating the spec
+01:10:28 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+01:10:28 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+01:10:28 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 2/5)
+01:11:42 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=8003 output_tokens=4907 duration=73.56s
+01:11:42 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 3/5)
+01:11:42 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+01:11:42 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+01:12:00 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+01:12:00 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_de4c5f02ccfa4999bea455d9ecd6d092/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+01:12:00 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+01:12:01 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+01:12:01 WARNING bt5151_credit_risk.graph      quality warning: [constant_features] 1 constant feature(s) detected: ['Credit_History_Age']. These add no predictive value.
+01:12:02 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 52 cols
+01:12:03 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+01:12:03 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+01:12:07 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=12313 output_tokens=217 duration=3.26s
+01:12:07 INFO    bt5151_credit_risk.graph      verdict: needs_repair, issues: 2
+01:12:07 WARNING bt5151_credit_risk.graph      [critical/distribution_sanity] Annual_Income: Annual_Income has a maximum value of 24,198,062 which is implausibly high.
+01:12:07 WARNING bt5151_credit_risk.graph      [major/information_loss] Credit_History_Age: Credit_History_Age has only a single unique value of 0 across all examples.
+01:12:07 INFO    bt5151_credit_risk.graph      summary: The feature frame has some major issues, including the implausible maximum in 'Annual_Income' and uniformity in 'Credit_History_Age'.
+01:12:07 WARNING bt5151_credit_risk.graph      quality review still failing after 3 attempts — accepting and moving on
+01:12:07 INFO    bt5151_credit_risk.graph  >>> generate-feature-engineering-code
+01:13:41 INFO    bt5151_credit_risk.llm  LLM call [generate-feature-engineering-code] model=o4-mini input_tokens=14867 output_tokens=10084 duration=94.12s
+01:13:41 INFO    bt5151_credit_risk.graph      entrypoint: engineer_features, code length: 5591 chars
+01:13:41 INFO    bt5151_credit_risk.graph      FE hypothesis: {"interactions_rationale": "Created six domain-driven interactions: EMI_to_sal_ratio capturing debt service ratio combining Total_EMI_per_month (MI=0.5471) and Monthly_Inhand_Salary (MI=0.5187) in line with the exploratory lead predicting MI>0.60; EMI_to_income_ratio and Debt_to_income_ratio to approximate consumer debt burden relative to income; avg_delay_per_payment to model payment discipline by merging Delay_from_due_date (MI=0.1215) and Num_of_Delayed_Payment; inquiries_per_loan and cards_per_account to refine signals from Num_Credit_Inquiries (MI=0.1114), Num_of_Loan, Num_Credit_Card (MI=0.1048), and Num_Bank_Accounts (MI=0.0995).", "dropped_features_rationale": "Dropped Credit_History_Age (nunique=1) as constant. No feature pairs exceeded |corr|>0.95 so no further drops. Expected to reduce noise without information loss.", "expected_impact": "EMI_to_sal_ratio should rank in the top-3 SHAP features for both linear and tree models by combining two highest-MI features and matching the eda hypothesis, boosting macro_f1 by ~1pp. avg_delay_per_payment should improve discrimination of late payers. Log-transform of skewed features (skew>6) in the linear view will reduce skewness (e.g., Total_EMI_per_month skew 7.10\u2192<1) and stabilize coefficients, improving AUC and calibration. cards_per_account and inquiries_per_loan add incremental predictive power by capturing per-unit credit usage patterns.", "eda_hypotheses_acted_on": ["exploratory_lead: The ratio Total_EMI_per_month/Monthly_Inhand_Salary may achieve MI>0.60 and boost macro_f1 by \u22651pp", "tested_prediction not implemented: XGBoost will outperform Logistic Regression because it relates to model selection, not feature engineering", "tested_prediction not implemented: Total_EMI_per_month will rank #1 in global SHAP because it's an evaluation expectation", "tested_prediction not implemented: Monthly_Inhand_Salary will occupy a top-2 position in LR coefficients because it's an evaluation outcome"]}
+01:13:41 INFO    bt5151_credit_risk.graph  >>> inspect-feature-engineering-code (attempt 1/3)
+01:13:41 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+01:13:41 INFO    bt5151_credit_risk.graph  >>> execute-feature-engineering
+01:13:59 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+01:13:59 INFO    bt5151_credit_risk.graph  >>> validate-feature-engineering
+01:14:02 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'report_file_exists': True, 'view_metadata_exists': True, 'linear_view_train_file_exists': True, 'linear_view_test_file_exists': True, 'linear_view_train_readable': True, 'linear_view_train_row_count_match': True, 'linear_view_test_readable': True, 'linear_view_test_row_count_match': True, 'linear_view_no_nans_in_train': True, 'linear_view_no_infs_in_train': True, 'linear_view_features_non_empty': True, 'linear_view_max_feature_cap': True, 'linear_view_no_nans_in_test': True, 'linear_view_no_infs_in_test': True, 'linear_view_column_alignment': True, 'tree_view_train_file_exists': True, 'tree_view_test_file_exists': True, 'tree_view_train_readable': True, 'tree_view_train_row_count_match': True, 'tree_view_test_readable': True, 'tree_view_test_row_count_match': True, 'tree_view_no_nans_in_train': True, 'tree_view_no_infs_in_train': True, 'tree_view_features_non_empty': True, 'tree_view_max_feature_cap': True, 'tree_view_no_nans_in_test': True, 'tree_view_no_infs_in_test': True, 'tree_view_column_alignment': True}
+01:14:04 INFO    bt5151_credit_risk.graph      feature views: {'linear_view': 57, 'tree_view': 57}
+01:14:04 INFO    bt5151_credit_risk.graph      default active view: tree_view
+01:14:04 INFO    bt5151_credit_risk.graph      model view map: {'logistic_regression': 'linear_view', 'random_forest': 'tree_view', 'xgboost': 'tree_view'}
+01:14:04 INFO    bt5151_credit_risk.graph      FE dropped (1):
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Credit_History_Age", "reason": "constant"}
+01:14:04 INFO    bt5151_credit_risk.graph      FE transformed (5):
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Num_Bank_Accounts", "transform": "log1p", "original_skew": 11.2025}
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Num_Credit_Card", "transform": "log1p", "original_skew": 8.458}
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Interest_Rate", "transform": "log1p", "original_skew": 9.006}
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Num_Credit_Inquiries", "transform": "log1p", "original_skew": 9.7862}
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Total_EMI_per_month", "transform": "log1p", "original_skew": 7.1025}
+01:14:04 INFO    bt5151_credit_risk.graph      FE added (6):
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "EMI_to_sal_ratio", "formula": "Total_EMI_per_month/Monthly_Inhand_Salary", "rationale": "debt service ratio combining top-MI features EMI(
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "EMI_to_income_ratio", "formula": "Total_EMI_per_month/Annual_Income", "rationale": "monthly EMI relative to annual income to capture debt 
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "Debt_to_income_ratio", "formula": "Outstanding_Debt/Annual_Income", "rationale": "current outstanding debt to income ratio"}
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "avg_delay_per_payment", "formula": "Delay_from_due_date/Num_of_Delayed_Payment", "rationale": "average days delayed per missed payment cap
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "inquiries_per_loan", "formula": "Num_Credit_Inquiries/Num_of_Loan", "rationale": "credit inquiries per loan capturing credit seeking behav
+01:14:04 INFO    bt5151_credit_risk.graph        {"column": "cards_per_account", "formula": "Num_Credit_Card/Num_Bank_Accounts", "rationale": "credit card usage per bank account indicating credit div
+01:14:04 INFO    bt5151_credit_risk.graph  >>> train-models
+01:14:04 INFO    bt5151_credit_risk.graph      validation policy: {"type": "grouped_entity", "group_column": "Customer_ID", "time_column": null, "stratify_target": true}
+01:15:23 INFO    bt5151_credit_risk.graph      baseline metrics (3-fold CV on train): {'logistic_regression': {'macro_f1': 0.6255}, 'random_forest': {'macro_f1': 0.7106}, 'xgboost': {'macro_f1': 0.7411}}
+01:15:26 INFO    bt5151_credit_risk.llm  LLM call [reason-hyperparameter-grid] model=gpt-4o input_tokens=1427 output_tokens=305 duration=3.29s
+01:15:26 INFO    bt5151_credit_risk.graph      LLM-reasoned grids:
+01:15:26 INFO    bt5151_credit_risk.graph        logistic_regression: {"model__C": {"type": "float", "low": 0.001, "high": 50.0, "log": true}}
+01:15:26 INFO    bt5151_credit_risk.graph        random_forest: {"max_depth": {"type": "int", "low": 8, "high": 20}, "min_samples_split": {"type": "int", "low": 2, "high": 20}}
+01:15:26 INFO    bt5151_credit_risk.graph        xgboost: {"max_depth": {"type": "int", "low": 4, "high": 12}, "learning_rate": {"type": "float", "low": 0.01, "high": 0.3, "log": true}, "subsample": {"type": "float", "low": 0.6, "high": 1.0}, "colsample_bytree": {"type": "float", "low": 0.6, "high": 1.0}}
+01:15:26 INFO    bt5151_credit_risk.graph      tuning reasoning: With 80k rows and 57 features, moderate to high depth (8-20) captures complexity without overfitting for RF. Low `min_samples_split` enhances flexibility. Log-scale `model__C` and `learning_rate` allow efficient exploration. No `n_estimators` for RF/XGB due to diminishing returns.
+01:15:26 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+01:15:27 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+01:15:27 INFO    bt5151_credit_risk.train      logistic_regression: tuning with Optuna (10 trials, 5-fold CV)...
+01:16:45 INFO    bt5151_credit_risk.train      logistic_regression: best_cv_score=0.6255 best_params={'model__C': 0.0018747059221802516}
+01:16:47 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+01:16:48 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+01:16:48 INFO    bt5151_credit_risk.train      random_forest: tuning with Optuna (10 trials, 5-fold CV)...
+01:17:47 INFO    bt5151_credit_risk.train      random_forest: best_cv_score=0.6714 best_params={'max_depth': 10, 'min_samples_split': 4}
+01:18:01 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+01:18:02 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+01:18:02 INFO    bt5151_credit_risk.train      xgboost: tuning with Optuna (10 trials, 5-fold CV)...
+01:25:40 INFO    bt5151_credit_risk.train      xgboost: best_cv_score=0.6714 best_params={'max_depth': 6, 'learning_rate': 0.013940346079873234, 'subsample': 0.8736932106048627, 'colsample_bytree': 0.7760609974958406}
+01:25:40 INFO    bt5151_credit_risk.train      xgboost early-stopping policy: grouped_entity (train=68000, eval=12000)
+01:27:09 INFO    bt5151_credit_risk.train      xgboost: early stopping found best_n_trees=1000
+01:27:41 INFO    bt5151_credit_risk.train      xgboost learning curve: 1000 rounds, best val_loss=0.716116 at round 1000, final=0.716116
+01:27:41 INFO    bt5151_credit_risk.graph      trained models: ['logistic_regression', 'random_forest', 'xgboost']
+01:27:41 INFO    bt5151_credit_risk.graph  >>> evaluate-models
+01:27:42 INFO    bt5151_credit_risk.graph      logistic_regression: accuracy=0.6435 macro_f1=0.6369
+01:27:42 INFO    bt5151_credit_risk.graph      logistic_regression confusion matrix (rows=true, cols=pred):
+01:27:42 INFO    bt5151_credit_risk.graph        Good: [2779, 193, 722]
+01:27:42 INFO    bt5151_credit_risk.graph        Poor: [703, 3939, 1084]
+01:27:42 INFO    bt5151_credit_risk.graph        Standard: [2010, 2417, 6153]
+01:27:42 INFO    bt5151_credit_risk.graph      logistic_regression  Good: precision=0.506 recall=0.752 f1=0.605 support=3694
+01:27:42 INFO    bt5151_credit_risk.graph      logistic_regression  Poor: precision=0.601 recall=0.688 f1=0.642 support=5726
+01:27:42 INFO    bt5151_credit_risk.graph      logistic_regression  Standard: precision=0.773 recall=0.582 f1=0.664 support=10580
+01:27:42 INFO    bt5151_credit_risk.graph      random_forest: accuracy=0.6826 macro_f1=0.6789
+01:27:42 INFO    bt5151_credit_risk.graph      random_forest confusion matrix (rows=true, cols=pred):
+01:27:42 INFO    bt5151_credit_risk.graph        Good: [2986, 121, 587]
+01:27:42 INFO    bt5151_credit_risk.graph        Poor: [600, 4556, 570]
+01:27:42 INFO    bt5151_credit_risk.graph        Standard: [1953, 2517, 6110]
+01:27:42 INFO    bt5151_credit_risk.graph      random_forest  Good: precision=0.539 recall=0.808 f1=0.647 support=3694
+01:27:42 INFO    bt5151_credit_risk.graph      random_forest  Poor: precision=0.633 recall=0.796 f1=0.705 support=5726
+01:27:42 INFO    bt5151_credit_risk.graph      random_forest  Standard: precision=0.841 recall=0.578 f1=0.685 support=10580
+01:27:42 INFO    bt5151_credit_risk.graph      xgboost: accuracy=0.6875 macro_f1=0.6833
+01:27:42 INFO    bt5151_credit_risk.graph      xgboost confusion matrix (rows=true, cols=pred):
+01:27:42 INFO    bt5151_credit_risk.graph        Good: [3017, 102, 575]
+01:27:42 INFO    bt5151_credit_risk.graph        Poor: [552, 4404, 770]
+01:27:42 INFO    bt5151_credit_risk.graph        Standard: [2032, 2220, 6328]
+01:27:42 INFO    bt5151_credit_risk.graph      xgboost  Good: precision=0.539 recall=0.817 f1=0.649 support=3694
+01:27:42 INFO    bt5151_credit_risk.graph      xgboost  Poor: precision=0.655 recall=0.769 f1=0.707 support=5726
+01:27:42 INFO    bt5151_credit_risk.graph      xgboost  Standard: precision=0.825 recall=0.598 f1=0.693 support=10580
+01:27:42 INFO    bt5151_credit_risk.graph  >>> training-diagnostics
+01:28:11 INFO    bt5151_credit_risk.llm  LLM call [generate-training-diagnostics] model=o4-mini input_tokens=18521 output_tokens=3277 duration=26.87s
+01:28:11 INFO    bt5151_credit_risk.graph      Good: struggle=low — High recall (0.817) on XGBoost. Of its 677 errors, 575 go to Standard vs 102 to Poor (5.6×). Feature space clearly separ
+01:28:11 INFO    bt5151_credit_risk.graph      Poor: struggle=medium — Moderate recall (0.769). Of its 1 322 errors, 770 go to Standard vs 552 to Good (1.4×). Poor and Standard share feature 
+01:28:11 INFO    bt5151_credit_risk.graph      Standard: struggle=high — Lowest recall (0.598). Of its 4 252 errors, 2 220 go to Poor vs 2 032 to Good (1.09×). The Standard class sits between G
+01:28:11 INFO    bt5151_credit_risk.graph      capacity logistic_regression: Underfitting. Best C=0.0019 implies heavy L2 regularisation; test macro_F1=0.637 vs CV=0.625 (1.2 pp gap) shows no overfitting but inability to captur
+01:28:11 INFO    bt5151_credit_risk.graph      capacity random_forest: Well-fitted. Best max_depth=10, min_samples_split=4; test macro_F1=0.679 vs CV=0.671 (0.8 pp gap) indicates low variance, sufficient depth to capture 
+01:28:11 INFO    bt5151_credit_risk.graph      capacity xgboost: Well-fitted high-capacity. max_depth=6, learning_rate≈0.014, subsample/colsample≈0.8. Validation loss declines steadily through 1 000+ rounds with no 
+01:28:11 INFO    bt5151_credit_risk.graph      hypothesis validation: 3 tested predictions checked
+01:28:11 INFO    bt5151_credit_risk.graph        [confirmed] XGBoost will outperform Logistic Regression by ≥4pp macro_f1 because Total_EMI_p → XGBoost macro_f1=0.6833 vs LR macro_f1=0.6369, gap=4.42pp
+01:28:11 INFO    bt5151_credit_risk.graph        [inconclusive] Total_EMI_per_month will rank #1 in global SHAP with mean |SHAP| ≥1.3× the SHAP  → Global SHAP rankings not yet available
+01:28:11 INFO    bt5151_credit_risk.graph        [inconclusive] Monthly_Inhand_Salary will occupy a top-2 position by absolute coefficient magni → LR coefficient magnitudes not evaluated
+01:28:11 INFO    bt5151_credit_risk.graph  >>> select-model
+01:28:12 DEBUG   matplotlib  matplotlib data path: /home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/matplotlib/mpl-data
+01:28:13 DEBUG   matplotlib  CONFIGDIR=/home/tough/.config/matplotlib
+01:28:13 DEBUG   matplotlib  interactive is False
+01:28:13 DEBUG   matplotlib  platform is linux
+01:28:13 DEBUG   matplotlib  CACHEDIR=/home/tough/.cache/matplotlib
+01:28:13 DEBUG   matplotlib.font_manager  Using fontManager instance from /home/tough/.cache/matplotlib/fontlist-v390.json
+01:28:29 INFO    bt5151_credit_risk.graph      global SHAP top-10 features:
+01:28:29 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 0.3364
+01:28:29 INFO    bt5151_credit_risk.graph        Interest_Rate: 0.3111
+01:28:29 INFO    bt5151_credit_risk.graph        Month: 0.1650
+01:28:29 INFO    bt5151_credit_risk.graph        Delay_from_due_date: 0.1533
+01:28:29 INFO    bt5151_credit_risk.graph        Credit_Mix_Standard: 0.1088
+01:28:29 INFO    bt5151_credit_risk.graph        Num_Credit_Card: 0.1078
+01:28:29 INFO    bt5151_credit_risk.graph        Credit_Mix_Good: 0.1068
+01:28:29 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: 0.0908
+01:28:29 INFO    bt5151_credit_risk.graph        Payment_of_Min_Amount: 0.0708
+01:28:29 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: 0.0548
+01:28:33 INFO    bt5151_credit_risk.llm  LLM call [reason-model-selection] model=gpt-4o input_tokens=2869 output_tokens=247 duration=3.86s
+01:28:33 INFO    bt5151_credit_risk.graph      selected: xgboost
+01:28:33 INFO    bt5151_credit_risk.graph      justification: XGBoost shows the highest accuracy (0.68745) and macro_f1 score (0.6833), indicating robust handling of all classes, especially the minority 'Good' class, with a recall of 0.8167. It also maintains competitive performance in terms of weighted_f1 and a manageable CV-test gap (0.6714 vs 0.68745), suggesting good generalization. Although slightly more complex than logistic regression, it significantly outperforms it, making the case for selection compelling.
+01:28:33 INFO    bt5151_credit_risk.graph      hypothesis validation: EDA predicted 'Total_EMI_per_month' and 'Monthly_Inhand_Salary' with high mutual information (MI), expecting EMI_to_sal_ratio as top SHAP features. Contrary to expectations, these did not rank in SHAP, instead 'Outstanding_Debt' led. Importance of 'Interest_Rate' aligns between SHAP and EDA, confirming parts of our hypothesis. Unpredicted influence of 'Outstanding_Debt' suggests review of interaction hypotheses. EMI_to_sal_ratio ranking fall was unexpected, not aligning with foreseen SHAP impact.
+01:28:33 INFO    bt5151_credit_risk.graph  >>> global-xai
+01:28:33 INFO    bt5151_credit_risk.graph      SHAP reused from select-model (skipping recomputation)
+01:28:33 INFO    bt5151_credit_risk.graph      SHAP beeswarm: 10 features, dependence: 3 features
+01:28:33 WARNING bt5151_credit_risk.graph      PFI computation failed: '[10650, 2041, 8668, 1114, 13902, 3002, 19771, 8115, 3525, 7879, 16441, 5252, 19393, 16796, 8094, 322, 9923, 7459, 19024, 17553, 9119, 16421, 10120, 19055, 3649, 3941, 16675, 12630, 11443, 12157, 3434, 18739, 17407, 15440, 10406, 16487, 19730, 13137, 3669, 15983, 14976, 15698, 13829, 13419, 960, 17744, 9864, 11263, 15782, 17196, 7554, 10498, 17928, 14753, 3024, 12121, 18494, 1419, 6209, 10742, 16143, 17617, 2783, 7713, 8600, 18830, 12751, 6384, 4807, 6195, 10648, 7567, 16397, 17524, 1346, 13124, 12673, 15455, 14001, 18621, 2119, 4309, 4484, 11013, 4770, 2712, 12186, 10947, 2545, 12619, 9851, 4410, 12407, 9610, 10718, 7571, 3570, 8602, 3559, 7439, 9325, 2300, 7666, 5804, 12022, 9757, 12014, 5211, 11548, 12366, 9270, 3975, 17232, 13656, 15645, 3298, 17410, 15155, 17276, 1968, 2112, 878, 19075, 12989, 7277, 5709, 12078, 6687, 6418, 9982, 19073, 4629, 8862, 14163, 385, 4186, 5345, 14990, 12634, 6286, 5933, 18512, 19717, 13363, 8072, 17020, 9543, 19094, 13355, 18631, 2848, 12791, 7722, 812, 11193, 5135, 8510, 7434, 16476, 1692, 6216, 12527, 15484, 5792, 4693, 10108, 5107, 13480, 4745, 1604, 17395, 16863, 1092, 13884, 6311, 351, 14782, 1530, 13591, 15215, 218, 6813, 5357, 13043, 1453, 14932, 4740, 2814, 7886, 4973, 10035, 3947, 19826, 9623, 1006, 10645, 17725, 5743, 12680, 14583, 19257, 11881, 4069, 14652, 15783, 17648, 4622, 10385, 14046, 1962, 1599, 10952, 4333, 12099, 6955, 18821, 8545, 15974, 13722, 15630, 13589, 14521, 19917, 9770, 1034, 10842, 16592, 10421, 2127, 12187, 5970, 13225, 15084, 14845, 14945, 447, 17277, 5453, 3211, 5561, 18911, 3210, 13813, 8966, 17653, 10649, 19714, 3971, 11366, 3778, 13079, 6352, 4007, 3776, 17147, 14104, 19145, 19183, 8426, 4337, 8117, 14012, 13651, 438, 16533, 9113, 9440, 1739, 606, 17085, 12998, 16972, 18366, 15683, 5746, 6270, 8851, 6600, 11378, 11605, 738, 1994, 119, 14926, 17609, 17436, 18553, 3405, 18466, 8626, 3481, 17818, 127, 10610, 15273, 19580, 19285, 12822, 3073, 2380, 2483, 3461, 15231, 7458, 15884, 15097, 18684, 14970, 474, 18287, 5557, 13948, 8891, 12521, 4448, 484, 10422, 19411, 14900, 11226, 7911, 2766, 16506, 11688, 4037, 16136, 8830, 8803, 3826, 5995, 503, 7988, 8109, 5382, 13951, 13138, 13435, 7725, 12033, 8129, 12787, 8292, 18321, 13060, 3295, 115, 5647, 12624, 14747, 7181, 1710, 15957, 5817, 15278, 2480, 10250, 4032, 13347, 16530, 9514, 4610, 5117, 6385, 15139, 6271, 341, 12529, 11551, 9527, 313, 11697, 10051, 12863, 16070, 17136, 18261, 4909, 17796, 8873, 18285, 409, 3795, 2703, 10342, 8582, 7667, 17183, 9725, 18153, 17036, 7720, 1905, 6717, 2174, 6769, 7161, 6504, 4420, 1272, 3519, 17477, 9567, 247, 17815, 2085, 12492, 13351, 4974, 3498, 13442, 1084, 4935, 6237, 6734, 12983, 14249, 11982, 5922, 17268, 19450, 4149, 5099, 9512, 13259, 17360, 17037, 3335, 17585, 19819, 13728, 9893, 7650, 2238, 14204, 251, 8196, 4706, 8143, 2714, 18079, 9529, 10341, 15290, 326, 7438, 6647, 6258, 9047, 3393, 17664, 19414, 16117, 1337, 3168, 12860, 19814, 2393, 19915, 15179, 5923, 2743, 5005, 18716, 19613, 8731, 14404, 5702, 3800, 2008, 9282, 15650, 19249, 4194, 1512, 18211, 3733, 7654, 2346, 2519, 139, 17947, 17762, 2444, 5198, 1402, 16321, 1730, 9260, 3721, 17840, 19736, 9531, 17730, 18906, 14283, 4074, 9049, 6438, 2267, 2830, 10495, 14177, 12291, 8366, 16894, 8466, 16075, 12950, 2946, 11292, 19606, 9293, 17747, 6162, 9758, 8544, 2579, 4387, 11225, 4832, 6705, 16192, 2626, 9098, 10872, 6888, 19364, 5687, 4949, 11330, 19490, 1805, 13811, 11997, 16480, 8508, 19715, 8575, 4877, 10879, 1147, 6076, 6309, 6210, 16879, 5714, 15143, 13302, 424, 7360, 19416, 7241, 15703, 9995, 15486, 2177, 7051, 6405, 5351, 12906, 1606, 17402, 3488, 4201, 18505, 17687, 16598, 18689, 6248, 6914, 14037, 4031, 4449, 11262, 18576, 3528, 18787, 17682, 2319, 12783, 3509, 11340, 8165, 5394, 8025, 4590, 10330, 16861, 2578, 19882, 8352, 17458, 2232, 2777, 15131, 1290, 14761, 2207, 3449, 15249, 9509, 3035, 16262, 16817, 10182, 2998, 6759, 2265, 7337, 10676, 4505, 18426, 6692, 14801, 14030, 3106, 221, 18356, 3050, 4285, 17541, 12246, 210, 18238, 1911, 499, 4999, 17917, 17266, 13683, 180, 18926, 13684, 12000, 11794, 7267, 15825, 15634, 14888, 466, 15057, 59, 4202, 18076, 7484, 1580, 7284, 19827, 9393, 2698, 11403, 4199, 19838, 14902, 7157, 2973, 7841, 14766, 7695, 5934, 17225, 5215, 11432, 11165, 11365, 6626, 13085, 12010, 14841, 10072, 14751, 8632, 14108, 1297, 13248, 200, 10559, 9800, 8453, 9651, 8892, 10263, 1202, 3643, 10990, 10723, 10356, 4351, 19402, 3011, 17107, 2621, 1534, 18178, 3836, 17766, 11520, 16080, 8550, 5129, 14008, 3352, 13454, 13758, 4903, 1087, 15244, 12088, 4884, 7947, 16823, 15819, 5391, 7245, 15682, 6279, 5194, 17121, 19672, 1729, 19914, 19841, 13336, 3310, 3415, 5861, 15237, 6259, 9619, 5863, 9806, 5849, 2754, 13643, 10192, 8035, 16836, 15027, 10761, 7375, 5998, 19733, 19732, 1282, 10784, 11067, 19688, 16141, 6826, 18361, 12084, 11051, 8331, 10078, 8993, 9818, 16874, 10646, 13993, 19989, 6896, 15370, 11679, 8962, 5474, 6402, 3725, 3739, 10221, 13084, 8732, 12491, 6775, 19980, 4291, 3579, 928, 3844, 18143, 10867, 17779, 17400, 6148, 8319, 1815, 6072, 9300, 11847, 19587, 5833, 19264, 14377, 10489, 11885, 5903, 7664, 14009, 2129, 7779, 2740, 17470, 8813, 15172, 10779, 1350, 9058, 13495, 9922, 1522, 6760, 18862, 2797, 7040, 2992, 13751, 15059, 9755, 7457, 7683, 17821, 10261, 12964, 88, 10399, 8972, 13250, 11162, 18190, 8513, 1443, 17557, 13249, 17831, 11081, 17948, 2301, 16292, 18254, 2361, 5071, 19638, 12402, 13826, 9264, 10675, 9059, 15527, 14251, 15831, 12842, 8020, 8303, 6186, 15409, 5023, 9790, 4391, 11233, 14539, 19974, 9992, 6740, 257, 8066, 13103, 1768, 17089, 5059, 7092, 14602, 10311, 8801, 10577, 19482, 346, 5148, 18008, 5020, 4344, 12864, 6301, 2981, 2414, 15597, 8797, 17550, 9411, 6075, 3529, 16522, 18439, 12579, 10290, 16751, 2065, 1704, 8141, 2084, 18811, 103, 5380, 14206, 1788, 18169, 15401, 4618, 12584, 17496, 4189, 3999, 12364, 8323, 11732, 11227, 12532, 12086, 3698, 11798, 57, 17724, 19121, 5513, 11625, 19883, 2467, 9742, 7053, 2026, 2812, 10249, 14992, 9016, 12384, 8854, 14648, 16526, 16206, 379, 16772, 1527, 7898, 6561, 6690, 6920, 15576, 15467, 10884, 17809, 8056, 15684, 9289, 4783, 3425, 911, 19506, 16324, 14844, 11658, 15655, 3769, 6088, 1981, 6557, 16404, 5761, 14722, 5834, 7353, 7782, 3784, 18626, 14326, 1535, 13981, 13593, 5421, 10992, 5183, 2605, 8083, 16409, 7537, 4520, 7899, 9966, 8137, 19922, 12240, 4816, 8481, 15380, 14959, 2448, 15922, 15264, 3, 11066, 8642, 8723, 344, 6188, 17241, 11882, 18277, 12933, 3315, 19387, 5248, 5381, 13708, 42, 13303, 10259, 795, 2549, 13610, 7530, 17460, 3100, 16816, 13823, 46, 19828, 19381, 4307, 16168, 15910, 9889, 15132, 17812, 8969, 10462, 5893, 5456, 8300, 12397, 2189, 7917, 14143, 2602, 16670, 9948, 10275, 14892, 11693, 9123, 10180, 15363, 12614, 7883, 13484, 19050, 19034, 17913, 2503, 19391, 4630, 1510, 6285, 15442, 18530, 13301, 12754, 18743, 19894, 1901, 708, 16124, 2495, 4450, 13649, 10585, 2571, 12659, 8509, 10529, 7149, 17234, 11773, 4336, 1430, 16171, 5537, 16826, 19235, 2270, 5900, 3507, 16885, 14159, 14093, 13583, 3171, 10328, 18296, 4755, 18355, 12505, 9734, 7365, 12493, 16555, 5784, 17293, 13099, 12399, 14886, 12859, 14796, 9052, 15324, 5800, 18019, 16532, 7877, 2277, 6428, 8246, 17622, 6959, 9565, 7089, 9901, 6829, 1162, 2864, 17034, 9618, 13160, 7552, 7747, 13540, 14812, 10202, 11060, 15323, 18451, 6987, 18874, 1355, 8816, 7167, 18463, 8349, 12788, 3901, 10765, 5814, 6220, 16066, 12591, 12389, 13582, 2559, 7199, 5945, 8823, 14811, 290, 4768, 6672, 5654, 11626, 2898, 13616, 7583, 640, 16722, 19895, 12745, 482, 6091, 17594, 10128, 19470, 19835, 6421, 3375, 13609, 16924, 4779, 6932, 17686, 17025, 2622, 11928, 18085, 18730, 4580, 15095, 12315, 12471, 9202, 16204, 6463, 11710, 1153, 16496, 9926, 17965, 16969, 16828, 11903, 9201, 17670, 4880, 14658, 4024, 7200, 4510, 4072, 11024, 18864, 17224, 19660, 852, 467, 16818, 10497, 16754, 19971, 11495, 10732, 736, 8136, 11123, 11793, 12090, 11507, 10946, 7014, 2457, 6863, 2392, 15780, 8722, 12092, 4836, 1144, 14553, 5412, 11183, 2133, 12233, 41, 3282, 12689, 13306, 11230, 1866, 14428, 2450, 3070, 2334, 13132, 2408, 17817, 1347, 5925, 8355, 5343, 9048, 5332, 19475, 17694, 19332, 18390, 10204, 6601, 19737, 5836, 2315, 14966, 2699, 1978, 15011, 323, 8730, 12740, 2308, 3486, 13011, 5018, 10124, 1227, 7724, 8679, 19043, 13991, 19665, 16559, 11414, 14278, 18727, 4097, 3571, 11015, 3043, 6377, 17316, 5352, 7662, 11943, 5990, 6427, 10994, 18634, 4447, 13064, 5683, 17728, 5996, 15973, 13685, 14897, 8197, 6685, 18750, 16465, 19843, 18337, 2250, 12801, 3248, 18084, 2753, 8703, 8058, 14695, 8248, 11983, 4699, 9075, 423, 17646, 9888, 9504, 16138, 3686, 3142, 17099, 15846, 13047, 6433, 31, 11056, 14165, 1433, 12897, 2252, 11937, 11119, 647, 7757, 7803, 17765, 5149, 13020, 6814, 10231, 15465, 3376, 16071, 4254, 2534, 9534, 1624, 1429, 3222, 7704, 217, 1862, 11373, 265, 1396, 18791, 8689, 15032, 12922, 8764, 2879, 19214, 8583, 2859, 8361, 12396, 12840, 12807, 13129, 9688, 14862, 7093, 6926, 4347, 17473, 12882, 14961, 10117, 3468, 9051, 17769, 9593, 6472, 12506, 387, 3710, 15851, 5587, 4258, 1035, 2043, 14105, 13966, 19161, 2641, 16587, 13880, 1554, 1611, 18667, 1163, 15227, 13113, 14529, 2647, 15260, 13804, 16455, 3912, 6478, 19208, 3522, 17958, 15074, 19357, 7451, 13274, 17, 6935, 1444, 4472, 705, 278, 8675, 16599, 14323, 13365, 273, 5144, 8616, 513, 16469, 5102, 14398, 4084, 10873, 11217, 2405, 17608, 7516, 8852, 9981, 10404, 18223, 13592, 5348, 4028, 9416, 12044, 3458, 1427, 9924, 17504, 3820, 6126, 14516, 9771, 14592, 11018, 6846, 3585, 11858, 13885, 14994, 8994, 16381, 6462, 14002, 11191, 8054, 6161, 6423, 4178, 1705, 17294, 19998, 17888, 17801, 5019, 476, 17092, 8877, 16068, 4600, 2235, 9997, 13361, 19775, 11907, 6335, 19663, 18375, 17672, 8833, 8028, 2826, 4286, 9559, 3068, 18080, 3111, 3213, 19534, 2034, 10351, 18555, 7668, 3572, 16510, 17907, 9091, 19220, 8576, 6756, 8771, 16383, 15468, 9125, 3366, 18260, 13410, 14097, 16658, 12189, 19291, 733, 14532, 18893, 16470, 2948, 18779, 5553, 2117, 16243, 18725, 15976, 16941, 3860, 4794, 6070, 11091, 12834, 16483, 18294, 5031, 6141, 16266, 7268, 11465, 6281, 1441, 3699, 7559, 17573, 3798, 3821, 12609, 7403, 13400, 7594, 4265, 17200, 16580, 12262, 7589, 7453, 9367, 6002, 6706, 4743, 2145, 2794, 1086, 12642, 1838, 13618, 10048, 14876, 7198, 19318, 1362, 4819, 6879, 8654, 3474, 5116, 7975, 7517, 14236, 5438, 1288, 18033, 8546, 11799, 10172, 17223, 18613, 5550, 18157, 17798, 11860, 2988, 14674, 5954, 3263, 327, 6424, 9614, 7717, 17130, 1807, 5022, 10013, 13927, 9560, 17323, 16270, 1383, 3472, 19900, 2150, 5502, 11335, 15216, 2752, 13655, 14689, 18179, 11750, 16656, 13348, 14129, 14727, 19673, 4525, 169, 4672, 6501, 2878, 6063, 17287, 11955, 10951, 10389, 13657, 6136, 10301, 5937, 11884, 12294, 14829, 3470, 12785, 16971, 10381, 5568, 137, 7029, 9423, 5225, 12712, 9751, 8048, 2140, 3000, 4738, 19655, 7948, 4441, 6669, 6549, 4352, 1397, 18871, 2141, 18513, 10963, 11785, 13604, 11813, 4614, 16640, 17696, 18705, 6835, 16503, 2312, 4197, 13587, 18464, 4828, 5199, 13027, 8542, 6225, 4388, 11055, 12454, 19070, 11677, 12009, 8086, 5667, 19991, 12535, 17299, 12644, 2676, 16529, 15551, 6, 2910, 11550, 8348, 10580, 2554, 4546, 14412, 9895, 10719, 17385, 17016, 11935, 16985, 1023, 19445, 15483, 19397, 2247, 7285, 13706, 13055, 11043, 4279, 5359, 6954, 11433, 14476, 14313, 17810, 9773, 2111, 2876, 8506, 9729, 3204, 4463, 13152, 12287, 5333, 13740, 8477, 4166, 18509, 12141, 7700, 6619, 2796, 15696, 12890, 4153, 7626, 17024, 11282, 15100, 4442, 17741, 18399, 9060, 2351, 19365, 5337, 10969, 7649, 1869, 16901, 10836, 13294, 6422, 8164, 3165, 13881, 14425, 13844, 17489, 3635, 12980, 16508, 13901, 3702, 361, 3115, 18878, 4296, 3489, 18338, 4245, 3589, 2760, 8657, 11796, 7020, 1157, 4824, 460, 14675, 17942, 291, 7703, 10870, 17375, 13802, 17752, 6268, 18385, 4325, 14972, 12657, 2687, 14314, 18652, 3682, 17576, 13388, 2279, 7648, 6193, 9652, 8628, 14505, 19399, 19493, 10331, 11822, 3256, 18618, 16115, 3410, 2616, 10596, 18879, 4739, 14509, 16773, 6810, 5203, 19465, 10170, 3287, 13694, 3707, 2781, 4972, 6866, 8525, 10227, 4462, 3048, 9558, 11222, 18331, 9233, 13078, 8091, 13464, 9539, 10414, 8241, 6831, 11946, 19169, 11557, 13174, 11436, 17683, 14772, 1957, 487, 7698, 2512, 8451, 9791, 9698, 19112, 13191, 9538, 8858, 9398, 18961, 17864, 17131, 1020, 5182, 10289, 8503, 9798, 14452, 6491, 12103, 134, 11899, 9162, 6266, 4205, 12063, 16442, 18442, 15214, 4680, 5503, 485, 11236, 967, 11457, 6069, 9453, 5354, 12094, 16932, 2225, 13641, 5758, 12443, 13185, 6056, 6253, 10534, 10347, 13338, 5350, 15642, 10315, 17176, 11140, 3485, 7261, 9347, 6211, 16218, 601, 3508, 10140, 2856, 4954, 12610, 2167, 2412, 7386, 17830, 5100, 16046, 13080, 5975, 741, 411, 14066, 9409, 16637, 3230, 3105, 3208, 11476, 17673, 2677, 11176, 18768, 4489, 10826, 17718, 286, 2624, 10113, 2516, 72, 19570, 410, 7881, 3143, 7449, 16356, 15815, 6916, 12077, 8387, 12016, 8670, 11352, 5230, 5858, 19239, 8629, 10630, 18858, 2298, 15299, 16413, 5331, 19666, 7348, 2585, 5762, 16679, 13723, 1071, 6228, 15821, 10731, 4771, 18698, 14120, 15267, 9396, 6730, 3633, 7772, 12405, 15808, 14237, 16820, 11573, 1731, 8239, 19314, 697, 1005, 8059, 13019, 12387, 5787, 12125, 9172, 12806, 9214, 11762, 12102, 12124, 7428, 17494, 10312, 2101, 15461, 101, 11105, 9681, 11808, 4574, 18735, 7513, 8279, 13373, 3846, 1664, 19612, 13602, 1476, 13536, 7809, 16936, 635, 17480, 15203, 14717, 16876, 4556, 707, 11934, 7019, 724, 3578, 5701, 836, 13924, 7402, 9400, 4902, 4540, 15365, 13549, 7568, 3233, 1158, 11135, 13959, 4013, 12613, 4148, 123, 1247, 17971, 13169, 4034, 10162, 4411, 9426, 18152, 11208, 6788, 10915, 18477, 2909, 4475, 9585, 8439, 16822, 8824, 18532, 963, 11270, 1959, 19940, 18374, 8991, 7553, 15221, 5436, 19363, 10840, 930, 5601, 9466, 8968, 14076, 15351, 2152, 13606, 12107, 19430, 3974, 4101, 2767, 3948, 18443, 8351, 7691, 11721, 14545, 15513, 17895, 9639, 18933, 15331, 3703, 4596, 8826, 17295, 14055, 2885, 4527, 8835, 16660, 7821, 13499, 4609, 5207, 6223, 15329, 18481, 7168, 14213, 4572, 18291, 11019, 12286, 12985, 8029, 16549, 17502, 11325, 13082, 7534, 6735, 12223, 2678, 1557, 18808, 11766, 11504, 8570, 15230, 10127, 12908, 10036, 10132, 14762, 11401, 3794, 14895, 17775, 19743, 13305, 16399, 14102, 16428, 11044, 11446, 1697, 14329, 15589, 14577, 17632, 1066, 7066, 12925, 16540, 7395, 735, 16739, 2498, 15142, 2136, 1698, 2039, 2360, 16195, 4328, 7582, 14515, 4751, 14653, 15404, 6490, 4110, 18907, 6913, 1219, 4966, 14548, 3532, 16563, 5671, 13218, 10690, 17230, 17596, 3125, 2046, 7681, 12259, 19918, 9683, 17737, 6346, 14608, 12887, 4156, 4653, 14467, 6328, 17040, 2968, 6020, 5407, 17856, 7468, 11290, 13822, 7138, 18044, 12073, 4049, 18950, 10881, 17454, 16602, 19636, 18040, 18214, 16450, 11579, 9431, 11179, 631, 17547, 18341, 1119, 2290, 12981, 5489, 11623, 2184, 3314, 14903, 16246, 274, 11327, 1804, 6179, 11319, 18636, 10512, 1776, 14807, 12056, 2701, 9366, 6562, 14049, 285, 4269, 4577, 7661, 11048, 6367, 18556, 549, 15284, 18524, 17776, 6682, 14920, 19586, 5195, 18170, 11237, 12154, 8647, 10712, 2067, 13831, 3169, 18678, 9464, 17804, 14443, 8619, 10411, 8049, 1358, 6275, 9442, 3394, 17655, 2255, 3502, 5081, 5584, 6641, 6290, 9360, 12032, 10628, 11402, 5927, 7932, 16892, 8272, 13818, 5653, 14781, 15593, 5572, 4318, 49, 9492, 8171, 6624, 6631, 4160, 8653, 1303, 17336, 17141, 9254, 19313, 6291, 16051, 15496, 426, 16824, 9222, 7660, 16753, 14316, 14250, 15473, 18673, 8686, 14260, 17983, 19925, 6733, 9660, 54, 8251, 18523, 19969, 14952, 401, 13473, 3077, 5960, 3429, 14374, 4438, 11082, 1722, 9231, 664, 16495, 14922, 13576, 7344, 18865, 5809, 18363, 4847, 5566, 16337, 15208, 12064, 8425, 19279, 7017, 7676, 8238, 18275, 4702, 19, 8715, 7745, 18162, 10809, 19188, 3047, 2487, 7808, 14611, 14439, 14799, 11379, 14511, 5143, 15163, 4140, 12385, 8586, 11213, 13806, 7897, 14253, 6876, 17966, 19616, 13133, 14356, 17318, 16488, 11764, 12753, 1983, 8409, 18445, 4488, 6023, 7793, 657, 751, 2081, 12217, 6061, 3341, 843, 12758, 15287, 13562, 10678, 15130, 10838, 19158, 3511, 17255, 11771, 19215, 12119, 15839, 11098, 576, 6874, 4461, 14785, 47, 6267, 7578, 15298, 17389, 18319, 1944, 16432, 1450, 16747, 5226, 15174, 5046, 2403, 10664, 13858, 10436, 14321, 15778, 3704, 2168, 8786, 19245, 6173, 10609, 15412, 12701, 15157, 16925, 6670, 13022, 17970, 4874, 5459, 3207, 4930, 3353, 744, 5371, 18184, 18136, 17182, 4445, 4401, 18733, 16635, 729, 4547, 1640, 14921, 14099, 12645, 542, 18280, 12116, 146, 3482, 19846, 241, 9808, 18653, 11188, 10299, 1952, 5227, 12060, 1594, 17352, 3919, 5460, 9430, 14438, 8822, 13688, 15843, 16121, 9477, 14284, 7780, 16491, 0, 6409, 8760, 10193, 12354, 2144, 18278, 7949, 13954, 2066, 13030, 6891, 3503, 2271, 5468, 6137, 12053, 5304, 14418, 19683, 15315, 8700, 12239, 4822, 18349, 6664, 9071, 19625, 19280, 19324, 4252, 16427, 17603, 12759, 17485, 16265, 3993, 6612, 8161, 3656, 6235, 11648, 6068, 7276, 1175, 10519, 14578, 4885, 13973, 19757, 10557, 8507, 16655, 14074, 7286, 16842, 8846, 4767, 13974, 4605, 8843, 5379, 1166, 7569, 3857, 9502, 6812, 5852, 1783, 1130, 8631, 13619, 13690, 7998, 18113, 1621, 5128, 9422, 6934, 13933, 7873, 10560, 16197, 8380, 19413, 13611, 3910, 11901, 12539, 16096, 9243, 14739, 5732, 5026, 10154, 16382, 4400, 14679, 15376, 15894, 9452, 7685, 7115, 13153, 15893, 19275, 8785, 8079, 9394, 14255, 19628, 13298, 5605, 10869, 7356, 483, 1315, 3015, 13439, 9097, 9899, 18403, 18675, 16005, 2485, 18432, 8665, 19588, 10215, 907, 1576, 14883, 1339, 11720, 8685, 5384, 18832, 11160, 1989, 14725, 7061, 16776, 15792, 6872, 15255, 14816, 121, 2609, 15867, 19511, 6218, 7172, 13457, 953, 4193, 15494, 4821, 11765, 2540, 5306, 1270, 5245, 16290, 1691, 19668, 18050, 18616, 14431, 13765, 14068, 2974, 7369, 7974, 2045, 7121, 15546, 2736, 17584, 8327, 6848, 10418, 10599, 13068, 1090, 3120, 11544, 1533, 8063, 9990, 3200, 11050, 2614, 13719, 16933, 2546, 12594, 9737, 16398, 11545, 2664, 14301, 10268, 3588, 7702, 16354, 5548, 19721, 6052, 10696, 13617, 12042, 17284, 10532, 18778, 2950, 1393, 13144, 16931, 12104, 6847, 3014, 17382, 16632, 12277, 18633, 5642, 13059, 5112, 13119, 1767, 7900, 17267, 10624, 15491, 15904, 10579, 17761, 16368, 19436, 5466, 19518, 17756, 15303, 17862, 4688, 3984, 19394, 1002, 1061, 8621, 14121, 18034, 13797, 7139, 5170, 9693, 13796, 10786, 4293, 4165, 10743, 2146, 5734, 19897, 2662, 14605, 19278, 19032, 19407, 8360, 586, 10105, 3194, 17226, 2266, 9444, 6178, 11304, 11632, 11343, 4509, 9055, 13141, 1280, 14759, 4921, 9875, 8603, 10818, 14214, 13546, 2638, 3545, 9666, 15357, 15256, 5168, 9498, 14100, 6332, 11000, 18135, 8875, 2442, 6074, 14989, 1398, 2281, 8651, 9246, 17306, 18707, 17132, 18741, 16072, 19633, 4881, 9975, 18668, 2556, 8814, 2305, 11266, 13761, 12549, 18251, 902, 16085, 7132, 181, 1063, 14474, 11287, 4772, 1853, 13166, 9687, 16659, 8908, 5554, 13642, 8287, 15028, 17567, 19401, 18182, 1926, 7677, 16671, 16582, 9185, 50, 17127, 14013, 2497, 12404, 15854, 9684, 6956, 11930, 2458, 19935, 8442, 10413, 5376, 19695, 6757, 6215, 3931, 13953, 13112, 9469, 7401, 8317, 12029, 1097, 8359, 9696, 11869, 3934, 4068, 11558, 7275, 205, 10671, 5446, 2086, 3668, 15201, 11491, 6527, 18734, 19779, 16970, 8242, 10614, 431, 2533, 2202, 8573, 10423, 16447, 5268, 1277, 6677, 9526, 18489, 14293, 19199, 18462, 4730, 19650, 1372, 884, 1039, 4504, 293, 2445, 12522, 10791, 9740, 16893, 12198, 16978, 18257, 6143, 7026, 3477, 5921, 2636, 1010, 10653, 3652, 19970, 13781, 3433, 6544, 11311, 7930, 8773, 16811, 5385, 6712, 10926, 900, 13413, 934, 6366, 18580, 18336, 3302, 1343, 16897, 359, 7918, 10908, 18394, 16968, 959, 10277, 1148, 19272, 11216, 2501, 9072, 9934, 13453, 10220, 222, 18308, 18194, 5859, 4338, 3156, 668, 15944, 10644, 13597, 10679, 14931, 19329, 12066, 19241, 14493, 3608, 7811, 17511, 10201, 3843, 14647, 8147, 4691, 5297, 17387, 15864, 7176, 15043, 5763, 9144, 13460, 13747, 1056, 9722, 2394, 459, 17820, 14185, 9375, 18747, 12663, 12877, 9357, 4528, 2157, 12545, 10286, 9253, 6164, 12138, 4339, 5888, 13437, 13724, 15367, 102, 5685, 1661, 14650, 2684, 9412, 7341, 14525, 19722, 11716, 15154, 1694, 9199, 1065, 12809, 11731, 16607, 18519, 15350, 5250, 3479, 5749, 17740, 720, 13175, 2358, 11711, 15159, 8980, 2893, 2608, 6292, 396, 14540, 17233, 17416, 15136, 12531, 2134, 11651, 15292, 15364, 7113, 10780, 18839, 3119, 13720, 5282, 4104, 17265, 1085, 7888, 7591, 6383, 10279, 12059, 10384, 10829, 17595, 10319, 9209, 3379, 2635, 10479, 1318, 1769, 13023, 10569, 11698, 8474, 2583, 3609, 3334, 16256, 16316, 1475, 130, 9161, 12711, 5760, 15625, 12110, 13164, 5106, 9237, 6779, 7178, 1825, 15972, 4010, 339, 13754, 4417, 11320, 14244, 14720, 8138, 4128, 6741, 17668, 15462, 2995, 15120, 12429, 19061, 11114, 6503, 12334, 9451, 5083, 12314, 8478, 15956, 18963, 15418, 2589, 15402, 5980, 7826, 3350, 11733, 8416, 3223, 12883, 12335, 8365, 3615, 17785, 14861, 10044, 6407, 8696, 19474, 5815, 535, 9234, 14620, 5426, 11020, 1836, 10354, 4742, 10463, 7463, 17298, 3463, 2680, 10119, 6373, 1890, 1038, 17604, 4073, 9999, 1870, 15196, 5894, 3728, 7671, 5999, 5751, 1688, 6836, 4842, 15844, 196, 518, 10581, 13320, 10790, 16939, 841, 9507, 5174, 14469, 7608, 11264, 14020, 18601, 19263, 12596, 18086, 18220, 2862, 17392, 14004, 182, 15127, 18772, 13418, 2522, 16260, 19446, 99, 10928, 18500, 12008, 19621, 16481, 9188, 15006, 4741, 1707, 254, 13544, 8441, 1302, 14441, 15076, 19382, 6918, 8454, 4625, 3930, 7180, 19845, 8825, 933, 259, 9090, 2518, 19853, 1373, 4048, 6350, 8043, 14595, 2009, 7806, 19836, 11341, 3950, 9815, 16445, 2912, 16191, 2874, 1037, 2704, 8108, 8568, 9575, 13572, 9349, 11844, 14985, 9655, 10611, 13163, 11859, 13345, 1540, 15678, 2697, 2286, 4788, 18931, 13692, 6808, 19028, 8710, 19515, 15280, 10346, 5716, 10008, 15194, 1984, 4731, 9483, 10256, 19349, 12846, 7801, 14059, 7562, 9877, 2813, 536, 17951, 1139, 6095, 16116, 17873, 1310, 17023, 3251, 3547, 6627, 15466, 5000, 7716, 7719, 7800, 10104, 18339, 2656, 3478, 8673, 17126, 16527, 7033, 11467, 19987, 3526, 1835, 8345, 16464, 9671, 1042, 15702, 4404, 18465, 18854, 19163, 377, 357, 12622, 19742, 13295, 7912, 13214, 9871, 17961, 2234, 19187, 14464, 12222, 19899, 17847, 4548, 18932, 2718, 5847, 2640, 2652, 7125, 4413, 8753, 9163, 1336, 113, 15495, 16666, 13483, 17757, 18326, 4345, 7049, 380, 4843, 15141, 19283, 11103, 135, 10419, 10958, 12076, 14754, 11665, 2087, 9811, 6473, 18966, 3997, 10087, 14497, 4356, 3288, 9249, 425, 18009, 18611, 10895, 5508, 16490, 7425, 6977, 7535, 3214, 1833, 3658, 14061, 16375, 18493, 15180, 9541, 12724, 7488, 14517, 8413, 6510, 8030, 12038, 3234, 1113, 12137, 13563, 373, 2099, 7134, 2993, 8170, 1275, 10254, 4304, 9750, 8260, 2132, 16601, 16845, 13928, 17702, 9066, 9668, 10764, 13525, 12111, 10039, 7177, 1720, 11686, 8318, 18538, 6390, 638, 12636, 4132, 9530, 16074, 1305, 4303, 13243, 14557, 14800, 10819, 10957, 13375, 13337, 1795, 8031, 10470, 1964, 2629, 8087, 14320, 11099, 17638, 8233, 18849, 5610, 12526, 6415, 11009, 6006, 2543, 6013, 2275, 8463, 10575, 420, 284, 17967, 3181, 6369, 16248, 3834, 18286, 4281, 11809, 18317, 8922, 17750, 9042, 5418, 12597, 13555, 682, 12470, 150, 19408, 5564, 3411, 8294, 14877, 8528, 9147, 16830, 5458, 6138, 4436, 14819, 4315, 15112, 2661, 17551, 13024, 13863, 3788, 16134, 1276, 16330, 5905, 5115, 12692, 116, 16268, 18769, 11724, 1112, 17398, 19674, 15809, 19560, 18584, 3651, 1255, 3684, 14024, 13691, 2481, 7711, 10156, 17405, 17544, 1602, 16862, 14737, 10823, 16049, 15949, 5259, 10461, 11906, 9363, 17870, 13963, 16956, 1921, 10778, 9520, 11318, 12231, 7596, 15345, 3938, 14156, 7889, 14718, 14336, 3607, 12752, 17280, 13539, 168, 18389, 17645, 13349, 12780, 14064, 398, 5865, 149, 3069, 16254, 94, 17435, 13577, 11958, 13334, 6067, 12818, 1496, 13251, 6871, 12215, 7144, 17786, 18602, 3746, 12243, 16966, 9194, 19309, 19479, 10439, 14998, 1967, 13252, 8784, 6613, 10739, 7708, 19500, 11139, 9352, 1479, 7913, 7336, 1498, 18383, 8900, 15895, 12616, 5719, 12288, 7270, 13845, 13165, 2688, 17588, 10613, 15075, 11195, 15353, 17388, 16426, 14863, 2715, 11370, 316, 6978, 15519, 18485, 19630, 15609, 7007, 2818, 5500, 11333, 4602, 30, 6903, 6417, 7976, 14405, 4456, 15481, 16891, 6357, 1965, 17386, 2025, 18782, 9617, 13846, 19694, 15882, 14576, 18045, 18457, 11322, 8483, 18398, 14063, 18496, 1593, 9659, 700, 13644, 9128, 14808, 6198, 3995, 7471, 1314, 8739, 764, 17733, 4342, 5952, 7319, 12548, 9835, 13988, 3613, 1455, 13343, 8139, 2894, 13253, 7781, 16918, 13695, 10333, 13961, 12550, 6145, 5948, 14157, 7556, 13898, 304, 18890, 5224, 15119, 17202, 6695, 15403, 252, 511, 17732, 13000, 6969, 18531, 9358, 12357, 750, 15545, 9854, 742, 176, 11206, 8285, 17559, 12865, 9577, 8769, 17415, 14322, 381, 14752, 9931, 15886, 7201, 9745, 14805, 8645, 9870, 7515, 6015, 8743, 984, 439, 8398, 3781, 15654, 19530, 5472, 12196, 18909, 13799, 13188, 12509, 1226, 7985, 14183, 11633, 17957, 903, 13980, 15270, 8280, 7107, 13342, 11008, 366, 10134, 3079, 6936, 17993, 10746, 15923, 15868, 8925, 13186, 1206, 12715, 14477, 1486, 11959, 5665, 167, 5377, 15940, 15631, 4894, 7203, 1418, 7748, 2254, 8860, 8394, 10282, 4244, 13530, 5140, 2069, 15224, 17253, 6667, 12832, 2175, 624, 16343, 4105, 3550, 7536, 13661, 147, 6798, 5786, 1354, 8756, 11010, 18676, 19063, 13195, 16541, 16319, 14969, 6306, 7584, 16289, 8223, 2447, 1887, 8818, 14774, 905, 15000, 17877, 4896, 19424, 12085, 14150, 9594, 3102, 12083, 517, 15181, 10302, 9195, 10612, 4750, 17711, 10159, 15098, 8206, 14660, 19266, 9809, 6925, 3107, 14354, 11866, 17697, 1693, 16431, 11505, 4385, 16852, 3289, 17374, 2499, 19238, 16125, 7983, 15012, 15794, 10062, 17192, 2574, 15613, 14335, 12694, 17096, 14585, 16993, 13102, 9239, 13143, 14750, 4089, 9515, 12469, 7316, 3601, 7997, 18299, 8268, 12285, 14297, 1064, 16435, 8522, 1771, 3989, 9115, 13925, 3865, 8687, 5589, 19657, 19820, 14777, 15276, 2299, 4467, 8255, 11843, 4246, 8354, 10755, 15689, 17788, 15610, 12200, 578, 9656, 14710, 9748, 4585, 14657, 9109, 676, 14381, 782, 13256, 6298, 6062, 1796, 13556, 9680, 11736, 15697, 13681, 15550, 17792, 3166, 9418, 10004, 7030, 10184, 2836, 19705, 1955, 16520, 14372, 13729, 13173, 19098, 9812, 533, 13647, 469, 9489, 3761, 5478, 5805, 10084, 13494] not in index'
+01:29:50 WARNING bt5151_credit_risk.xai      PDP failed for Delay_from_due_date: Invalid value '4.040816326530612' for dtype 'int64'
+01:30:15 INFO    bt5151_credit_risk.graph      PDP computed for 4 uncorrelated features: ['Outstanding_Debt', 'Interest_Rate', 'Month', 'Num_Credit_Card']
+01:30:15 INFO    bt5151_credit_risk.graph      methods used: ['shap', 'pdp']
+01:30:15 INFO    bt5151_credit_risk.graph  >>> local-xai (casebook)
+01:30:37 INFO    bt5151_credit_risk.graph      selected 9 local XAI cases
+01:30:37 INFO    bt5151_credit_risk.graph        [representative] row=10417 true=Good pred=Good conf=0.965
+01:30:37 INFO    bt5151_credit_risk.graph        [borderline] row=15003 true=Good pred=Good conf=0.371
+01:30:37 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=15594 true=Good pred=Standard conf=0.945 confused_with=Standard
+01:30:37 INFO    bt5151_credit_risk.graph        [representative] row=16849 true=Poor pred=Poor conf=0.950
+01:30:37 INFO    bt5151_credit_risk.graph        [borderline] row=420 true=Poor pred=Poor conf=0.350
+01:30:37 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=16457 true=Poor pred=Standard conf=0.920 confused_with=Standard
+01:30:37 INFO    bt5151_credit_risk.graph        [representative] row=19450 true=Standard pred=Standard conf=0.982
+01:30:37 INFO    bt5151_credit_risk.graph        [borderline] row=3184 true=Standard pred=Standard conf=0.356
+01:30:37 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=2008 true=Standard pred=Good conf=0.965 confused_with=Good
+01:30:37 INFO    bt5151_credit_risk.graph  >>> interpret-xai-evidence
+01:30:57 INFO    bt5151_credit_risk.llm  LLM call [interpret-xai-evidence] model=o4-mini input_tokens=12740 output_tokens=2503 duration=19.75s
+01:30:57 INFO    bt5151_credit_risk.graph      observation: Outstanding_Debt is the top SHAP feature with mean|SHAP|=0.3364, followed by Interest_Rate (0.3111), Month (0.1650), Del
+01:30:57 INFO    bt5151_credit_risk.graph      observation: PDP for Outstanding_Debt shows non-monotonic multi-class effects: Good probability declines steadily above ~500 then pla
+01:30:57 INFO    bt5151_credit_risk.graph      observation: PDP for Interest_Rate is also nonlinear: Good probability peaks ~0.36 at 4%, then drops to ~0.13 by 25–30%; Poor probabi
+01:30:57 INFO    bt5151_credit_risk.graph      insight: The model relies on nonlinear thresholds in Outstanding_Debt and Interest_Rate to distinguish classes, creating complex 
+01:30:57 INFO    bt5151_credit_risk.graph      insight: Month acts as a proxy for seasonal or time-on-book effects: values ≥4 dramatically shift probability to Standard, causin
+01:30:57 INFO    bt5151_credit_risk.graph      consensus interpretation: PFI results are unavailable; SHAP identifies top nonlinear drivers. Without PFI we cannot assess redundancy vs interacti
+01:30:57 INFO    bt5151_credit_risk.graph      worst misclass pattern: Both Good→Standard and Poor→Standard errors occur when Month≥4 and Credit_Mix_Standard=1, overriding high Outstanding_De
+01:30:57 INFO    bt5151_credit_risk.graph      [tested] Ablating Month will decrease Standard recall by ≥5pp and improve Good/Poor recall by ≥3pp
+01:30:57 INFO    bt5151_credit_risk.graph      [supported] Adding a squared Outstanding_Debt term will reduce Good→Standard errors by ≥10%
+01:30:57 INFO    bt5151_credit_risk.graph      [exploratory] Interactions between Month and Changed_Credit_Limit capture temporal credit policy effects and will enter top-5 SHAP fea
+01:30:57 INFO    bt5151_credit_risk.graph  >>> package-analysis-bundle
+01:30:57 INFO    bt5151_credit_risk.graph      analysis bundle saved to /home/tough/BT5151 GroupProject/analysis_bundle_20260414T173057Z.json
+01:30:57 INFO    bt5151_credit_risk.graph      bundle summary keys: ['selected_model', 'class_names', 'eda_model_prediction', 'eda_class_struggle', 'eda_tested_count', 'capacity_analysis', 'hypothesis_validation', 'per_class_analysis', 'xai_methods_used', 'pfi_top5', 'casebook_count', 'casebook_summary', 'xai_observations', 'xai_insights', 'xai_consensus', 'xai_casebook_analysis', 'xai_hypotheses']
+01:30:57 INFO    bt5151_credit_risk.graph  >>> run-inference
+01:30:57 INFO    bt5151_credit_risk.graph      row 42 → predicted: Good, confidence: 0.6942
+01:30:59 INFO    bt5151_credit_risk.graph      SHAP: Credit_Mix_Good = 0.3068 (positive)
+01:30:59 INFO    bt5151_credit_risk.graph      SHAP: Interest_Rate = 0.3063 (positive)
+01:30:59 INFO    bt5151_credit_risk.graph      SHAP: Outstanding_Debt = 0.2143 (positive)
+01:30:59 INFO    bt5151_credit_risk.graph      SHAP: Delay_from_due_date = 0.1337 (positive)
+01:30:59 INFO    bt5151_credit_risk.graph      SHAP: Payment_of_Min_Amount = 0.1279 (positive)
+01:30:59 INFO    bt5151_credit_risk.graph  >>> explain-risk
+01:31:07 INFO    bt5151_credit_risk.llm  LLM call [explain-risk] model=gpt-4o input_tokens=4872 output_tokens=512 duration=8.05s
+01:31:07 INFO    bt5151_credit_risk.graph      risk_level: low, confidence_band: medium
+01:31:07 INFO    bt5151_credit_risk.graph  >>> recommend-action
+01:31:09 INFO    bt5151_credit_risk.llm  LLM call [recommend-action] model=gpt-4o input_tokens=1520 output_tokens=52 duration=1.59s
+01:31:09 INFO    bt5151_credit_risk.graph      action: standard_handling
+01:31:09 INFO    run_stage  === Stage 'full' completed in 1566.3s ===
+01:31:09 INFO    run_stage  --- dataset-policy-spec ---
+01:31:09 INFO    run_stage    target_column: Credit_Score
+01:31:09 INFO    run_stage    task_type: multiclass_classification
+01:31:09 INFO    run_stage    split_strategy: {'type': 'grouped_holdout', 'test_size': 0.2, 'group_column': 'Customer_ID'}
+01:31:09 INFO    run_stage    rows: 100000, target_distribution: {'Standard': 53174, 'Poor': 28998, 'Good': 17828}
+01:31:09 INFO    run_stage  --- exploratory-data-analysis ---
+01:31:09 INFO    run_stage    high-correlation pairs (|r|>0.8): 0
+01:31:09 INFO    run_stage    highly skewed (|skew|>2): ['Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_Credit_Inquiries', 'Total_EMI_per_month']
+01:31:09 INFO    run_stage    high-cardinality (>20): ['ID', 'Monthly_Balance', 'Amount_invested_monthly', 'Annual_Income', 'Outstanding_Debt', 'SSN', 'Customer_ID', 'Name', 'Type_of_Loan', 'Changed_Credit_Limit', 'Age', 'Num_of_Delayed_Payment', 'Num_of_Loan', 'Credit_History_Age']
+01:31:09 INFO    run_stage    MNAR suspects: ['Type_of_Loan']
+01:31:09 INFO    run_stage    top discriminative features (mutual information):
+01:31:09 INFO    run_stage      Total_EMI_per_month: MI=0.5471
+01:31:09 INFO    run_stage      Monthly_Inhand_Salary: MI=0.5187
+01:31:09 INFO    run_stage      Interest_Rate: MI=0.1705
+01:31:09 INFO    run_stage      Delay_from_due_date: MI=0.1215
+01:31:09 INFO    run_stage      Num_Credit_Inquiries: MI=0.1114
+01:31:09 INFO    run_stage      Num_Credit_Card: MI=0.1048
+01:31:09 INFO    run_stage      Num_Bank_Accounts: MI=0.0995
+01:31:09 INFO    run_stage      Credit_Utilization_Ratio: MI=0.0000
+01:31:09 INFO    run_stage    top ANOVA features:
+01:31:09 INFO    run_stage      Delay_from_due_date: F=11471.89 (p=0.000000)
+01:31:09 INFO    run_stage      Monthly_Inhand_Salary: F=1903.07 (p=0.000000)
+01:31:09 INFO    run_stage      Credit_Utilization_Ratio: F=105.30 (p=0.000000)
+01:31:09 INFO    run_stage      Num_Credit_Inquiries: F=6.26 (p=0.001921)
+01:31:09 INFO    run_stage      Num_Bank_Accounts: F=5.50 (p=0.004072)
+01:31:09 INFO    run_stage  --- column-transform-spec ---
+01:31:09 INFO    run_stage    columns: 23 kept, 5 dropped
+01:31:09 INFO    run_stage    reasoning (28 columns):
+01:31:09 INFO    run_stage      ID: Identifier per policy, high cardinality (100k unique), dropped
+01:31:09 INFO    run_stage      Customer_ID: Group key for grouped holdout, semantic_role group_identifier, dropped from features
+01:31:09 INFO    run_stage      Month: Temporal feature with 8 distinct month names; decomposed to month number 1–12
+01:31:09 INFO    run_stage      Name: Identifier per policy, high cardinality (~10k unique plus NaNs), dropped
+01:31:09 INFO    run_stage      Age: Numeric_continuous: string with errors ('-500','28_'), top 10 values 25–38; extract digits, clip [18,100], median impute
+01:31:09 INFO    run_stage      SSN: Identifier per policy, high cardinality (12.5k unique, many invalids), dropped
+01:31:09 INFO    run_stage      Occupation: Unordered_categorical with 16 categories, placeholder '_______' appears 7k×; one-hot after mapping to NaN, mode impute
+01:31:09 INFO    run_stage      Annual_Income: Numeric_continuous stored as string, high cardinality (18.9k); convert to float, median impute
+01:31:09 INFO    run_stage      Monthly_Inhand_Salary: Numeric_continuous (float64), p1=531.9,p99=13814.9,max=15204.6; clip [300,15000], median impute
+01:31:09 INFO    run_stage      Num_Bank_Accounts: Numeric_count, negative and extreme outliers (min=-1,p99=445,max=1798); clip [0,50], mode impute
+01:31:09 INFO    run_stage  --- preprocessing ---
+01:31:09 INFO    run_stage    validation passed: False
+01:31:09 INFO    run_stage    attempt count: 3
+01:31:09 INFO    run_stage    feature columns (57): ['Month', 'Age', 'Annual_Income', 'Monthly_Inhand_Salary', 'Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_of_Loan', 'Delay_from_due_date', 'Num_of_Delayed_Payment', 'Changed_Credit_Limit', 'Num_Credit_Inquiries', 'Outstanding_Debt', 'Credit_Utilization_Ratio', 'Payment_of_Min_Amount']
+01:31:09 INFO    run_stage    class names: ['Good', 'Poor', 'Standard']
+01:31:09 INFO    run_stage    train/test split: 80000 / 20000 rows
+01:31:09 INFO    run_stage  --- feature-engineering ---
+01:31:09 INFO    run_stage    validation passed: True
+01:31:09 INFO    run_stage    attempt count: 1
+01:31:09 INFO    run_stage    hypothesis:
+01:31:09 INFO    run_stage      interactions_rationale: Created six domain-driven interactions: EMI_to_sal_ratio capturing debt service ratio combining Total_EMI_per_month (MI=0.5471) and Monthly_Inhand_Salary (MI=0.5187) in line with the exploratory lead predicting MI>0.60; EMI_to_income_ratio and Debt_to_income_ratio to approximate consumer debt burden relative to income; avg_delay_per_payment to model payment discipline by merging Delay_from_due_date (MI=0.1215) and Num_of_Delayed_Payment; inquiries_per_loan and cards_per_account to refine signals from Num_Credit_Inquiries (MI=0.1114), Num_of_Loan, Num_Credit_Card (MI=0.1048), and Num_Bank_Accounts (MI=0.0995).
+01:31:09 INFO    run_stage      dropped_features_rationale: Dropped Credit_History_Age (nunique=1) as constant. No feature pairs exceeded |corr|>0.95 so no further drops. Expected to reduce noise without information loss.
+01:31:09 INFO    run_stage      expected_impact: EMI_to_sal_ratio should rank in the top-3 SHAP features for both linear and tree models by combining two highest-MI features and matching the eda hypothesis, boosting macro_f1 by ~1pp. avg_delay_per_payment should improve discrimination of late payers. Log-transform of skewed features (skew>6) in the linear view will reduce skewness (e.g., Total_EMI_per_month skew 7.10→<1) and stabilize coefficients, improving AUC and calibration. cards_per_account and inquiries_per_loan add incremental predictive power by capturing per-unit credit usage patterns.
+01:31:09 INFO    run_stage      eda_hypotheses_acted_on: ['exploratory_lead: The ratio Total_EMI_per_month/Monthly_Inhand_Salary may achieve MI>0.60 and boost macro_f1 by ≥1pp', 'tested_prediction not implemented: XGBoost will outperform Logistic Regression because it relates to model selection, not feature engineering', "tested_prediction not implemented: Total_EMI_per_month will rank #1 in global SHAP because it's an evaluation expectation", "tested_prediction not implemented: Monthly_Inhand_Salary will occupy a top-2 position in LR coefficients because it's an evaluation outcome"]
+01:31:09 INFO    run_stage    feature columns after FE: 57
+01:31:09 INFO    run_stage  --- train-models ---
+01:31:09 INFO    run_stage    logistic_regression: best_cv=0.6255 params={'model__C': 0.0018747059221802516}
+01:31:09 INFO    run_stage    random_forest: best_cv=0.6714 params={'max_depth': 10, 'min_samples_split': 4}
+01:31:09 INFO    run_stage    xgboost: best_cv=0.6714 params={'max_depth': 6, 'learning_rate': 0.013940346079873234, 'subsample': 0.8736932106048627, 'colsample_bytree': 0.7760609974958406}
+01:31:09 INFO    run_stage    xgboost learning curve: 1000 rounds, best=0.716116 at round 1000, final=0.716116
+01:31:09 INFO    run_stage    logistic_regression: 10 trials, best=0.6255, worst=0.6197
+01:31:09 INFO    run_stage    random_forest: 10 trials, best=0.6714, worst=0.6627
+01:31:09 INFO    run_stage    xgboost: 10 trials, best=0.6714, worst=0.6566
+01:31:09 INFO    run_stage  --- evaluate + select-model ---
+01:31:09 INFO    run_stage    logistic_regression: macro_f1=0.6369 weighted_f1=0.6466 accuracy=0.6435
+01:31:09 INFO    run_stage      Good: P=0.506 R=0.752 F1=0.605 support=3694
+01:31:09 INFO    run_stage      Poor: P=0.601 R=0.688 F1=0.642 support=5726
+01:31:09 INFO    run_stage      Standard: P=0.773 R=0.582 F1=0.664 support=10580
+01:31:09 INFO    run_stage    random_forest: macro_f1=0.6789 weighted_f1=0.6836 accuracy=0.6826
+01:31:09 INFO    run_stage      Good: P=0.539 R=0.808 F1=0.647 support=3694
+01:31:09 INFO    run_stage      Poor: P=0.633 R=0.796 F1=0.705 support=5726
+01:31:09 INFO    run_stage      Standard: P=0.841 R=0.578 F1=0.685 support=10580
+01:31:09 INFO    run_stage    xgboost: macro_f1=0.6833 weighted_f1=0.6892 accuracy=0.6875
+01:31:09 INFO    run_stage      Good: P=0.539 R=0.817 F1=0.649 support=3694
+01:31:09 INFO    run_stage      Poor: P=0.655 R=0.769 F1=0.707 support=5726
+01:31:09 INFO    run_stage      Standard: P=0.825 R=0.598 F1=0.693 support=10580
+01:31:09 INFO    run_stage    selected model: xgboost
+01:31:09 INFO    run_stage    justification: XGBoost shows the highest accuracy (0.68745) and macro_f1 score (0.6833), indicating robust handling of all classes, especially the minority 'Good' class, with a recall of 0.8167. It also maintains competitive performance in terms of weighted_f1 and a manageable CV-test gap (0.6714 vs 0.68745), suggesting good generalization. Although slightly more complex than logistic regression, it significantly outperforms it, making the case for selection compelling.
+01:31:09 INFO    run_stage    global SHAP top-10:
+01:31:09 INFO    run_stage      Outstanding_Debt: 0.3364
+01:31:09 INFO    run_stage      Interest_Rate: 0.3111
+01:31:09 INFO    run_stage      Month: 0.1650
+01:31:09 INFO    run_stage      Delay_from_due_date: 0.1533
+01:31:09 INFO    run_stage      Credit_Mix_Standard: 0.1088
+01:31:09 INFO    run_stage      Num_Credit_Card: 0.1078
+01:31:09 INFO    run_stage      Credit_Mix_Good: 0.1068
+01:31:09 INFO    run_stage      Changed_Credit_Limit: 0.0908
+01:31:09 INFO    run_stage      Payment_of_Min_Amount: 0.0708
+01:31:09 INFO    run_stage      Num_Credit_Inquiries: 0.0548
+01:31:09 INFO    run_stage  --- inference + explain + recommend ---
+01:31:09 INFO    run_stage    prediction: Good (confidence 0.6942)
+01:31:09 INFO    run_stage    per-prediction SHAP top-5:
+01:31:09 INFO    run_stage      Credit_Mix_Good: 0.3068 (positive)
+01:31:09 INFO    run_stage      Interest_Rate: 0.3063 (positive)
+01:31:09 INFO    run_stage      Outstanding_Debt: 0.2143 (positive)
+01:31:09 INFO    run_stage      Delay_from_due_date: 0.1337 (positive)
+01:31:09 INFO    run_stage      Payment_of_Min_Amount: 0.1279 (positive)
+01:31:09 INFO    run_stage    risk_level: low, confidence_band: medium
+01:31:09 INFO    run_stage    summary: The model predicts a 'Good' classification largely due to the positive influence of a strong credit mix and an acceptable interest rate. This classification aligns with expectations, given the applicant's strong credit indicators and moderate outstanding debt.
+01:31:09 INFO    run_stage    action: standard_handling — The predicted 'Good' classification indicates low risk, supported by a strong credit mix and manageable interest rate and debt. Confidence is medium but aligns with expectations.
+01:31:09 INFO    run_stage  --- Token usage summary ---
+01:31:09 INFO    run_stage  Total LLM calls: 15
+01:31:09 INFO    run_stage  Total tokens: 176525 (input: 126056, output: 50469)
+01:31:09 INFO    run_stage  Total LLM duration: 525.92s
+01:31:09 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4377 out=179 4.55s
+01:31:09 INFO    run_stage    [generate-eda-hypotheses] model=o4-mini in=3995 out=4134 43.49s
+01:31:09 INFO    run_stage    [column-transform-spec] model=o4-mini in=10072 out=7216 67.97s
+01:31:09 INFO    run_stage    [generate-preprocessing-code] model=gpt-4o in=13294 out=2560 24.56s
+01:31:09 INFO    run_stage    [repair-preprocessing-code] model=o4-mini in=8593 out=5324 53.66s
+01:31:09 INFO    run_stage    [repair-preprocessing-code] model=o4-mini in=8593 out=8952 97.34s
+01:31:09 INFO    run_stage    [repair-preprocessing-code] model=o4-mini in=8003 out=4907 73.56s
+01:31:09 INFO    run_stage    [audit-preprocessing] model=gpt-4o in=12313 out=217 3.26s
+01:31:09 INFO    run_stage    [generate-feature-engineering-code] model=o4-mini in=14867 out=10084 94.12s
+01:31:09 INFO    run_stage    [reason-hyperparameter-grid] model=gpt-4o in=1427 out=305 3.29s
+01:31:09 INFO    run_stage    [generate-training-diagnostics] model=o4-mini in=18521 out=3277 26.87s
+01:31:09 INFO    run_stage    [reason-model-selection] model=gpt-4o in=2869 out=247 3.86s
+01:31:09 INFO    run_stage    [interpret-xai-evidence] model=o4-mini in=12740 out=2503 19.75s
+01:31:09 INFO    run_stage    [explain-risk] model=gpt-4o in=4872 out=512 8.05s
+01:31:09 INFO    run_stage    [recommend-action] model=gpt-4o in=1520 out=52 1.59s
+01:31:09 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_full_20260415_010459.log

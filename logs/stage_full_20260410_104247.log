@@ -1,0 +1,55 @@
+10:42:47 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/logs/stage_full_20260410_104247.log
+10:42:52 INFO    run_stage  === Full pipeline (row_index=42) ===
+10:42:52 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+10:42:54 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+10:42:58 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=146 duration=3.92s
+10:42:58 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'leakage_policy', 'imbalance_policy']
+10:42:59 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+10:42:59 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+10:43:09 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o input_tokens=8077 output_tokens=1234 duration=9.66s
+10:43:09 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms']
+10:43:09 INFO    bt5151_credit_risk.graph  >>> generate-preprocessing-code
+10:43:27 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=10996 output_tokens=2605 duration=19.09s
+10:43:27 INFO    bt5151_credit_risk.graph      entrypoint: run_preprocessing, code length: 8217 chars
+10:43:27 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 1/5)
+10:43:27 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+10:43:27 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+10:44:00 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+10:44:00 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_7241d5e9b1494f548ef8f9ccf71640db/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+10:44:00 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+10:44:02 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+10:44:03 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 67 cols
+10:44:03 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+10:44:03 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+10:44:10 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=11920 output_tokens=314 duration=5.03s
+10:44:10 INFO    bt5151_credit_risk.graph      verdict: needs_repair, issues: 3
+10:44:10 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Type_of_Loan: Delimiter splitting for 'Type_of_Loan' was not done as expected, leading to columns like 'and Auto Loan', indicating split artifacts.
+10:44:10 WARNING bt5151_credit_risk.graph      [major/distribution_sanity] Annual_Income: Annual_Income has a maximum value of 24,198,062 which is implausibly high for personal income.
+10:44:10 WARNING bt5151_credit_risk.graph      [major/distribution_sanity] Num_of_Delayed_Payment: Num_of_Delayed_Payment has a minimum value of -3, which is invalid for a count metric.
+10:44:10 INFO    bt5151_credit_risk.graph      summary: Major issues found in Type_of_Loan encoding artifacts and implausible values in Annual_Income and Num_of_Delayed_Payment. Repairs are needed.
+10:44:10 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 1/5)
+10:44:31 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=gpt-4o input_tokens=6094 output_tokens=2635 duration=20.55s
+10:44:31 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 2/5)
+10:44:31 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+10:44:31 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+10:46:29 INFO    bt5151_credit_risk.graph      returncode: None, timed_out: True, success: False
+10:46:29 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_bc091bef9dbb410cbade13d4a260b45f/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+10:46:29 WARNING bt5151_credit_risk.graph      missing artifacts: ['target.csv', 'split_manifest.json', 'preprocessing_report.json']
+10:46:29 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+10:46:31 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': False}
+10:46:31 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_bc091bef9dbb410cbade13d4a260b45f/split_manifest.json.
+10:46:31 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_bc091bef9dbb410cbade13d4a260b45f/target.csv.
+10:46:31 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+10:46:31 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+10:46:31 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+10:46:31 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 2/5)
+10:46:54 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=gpt-4o input_tokens=6067 output_tokens=2947 duration=22.27s
+10:46:54 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 3/5)
+10:46:54 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+10:46:54 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing

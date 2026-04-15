@@ -1,0 +1,148 @@
+15:51:57 INFO    run_stage  Stage: specs | Log file: /home/tough/BT5151 GroupProject/logs/stage_specs_20260410_155157.log
+15:52:04 INFO    run_stage  === Stage 'specs' (stop_after=column-transform-spec, row_index=0) ===
+15:52:04 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+15:52:05 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+15:52:10 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=145 duration=4.46s
+15:52:10 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'leakage_policy', 'imbalance_policy']
+15:52:10 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+15:52:10 INFO    bt5151_credit_risk.graph  >>> exploratory-data-analysis
+15:52:19 INFO    bt5151_credit_risk.graph      top discriminative features (mutual information):
+15:52:19 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: MI=0.5471
+15:52:19 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: MI=0.5187
+15:52:19 INFO    bt5151_credit_risk.graph        Interest_Rate: MI=0.1705
+15:52:19 INFO    bt5151_credit_risk.graph        Delay_from_due_date: MI=0.1215
+15:52:19 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: MI=0.1114
+15:52:19 INFO    bt5151_credit_risk.graph        Num_Credit_Card: MI=0.1048
+15:52:19 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: MI=0.0995
+15:52:19 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: MI=0.0000
+15:52:19 INFO    bt5151_credit_risk.graph      highly skewed columns (|skew| > 2): 5
+15:52:19 INFO    bt5151_credit_risk.graph      high-cardinality categoricals (>20 unique):
+15:52:19 INFO    bt5151_credit_risk.graph        ID: 100000 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Monthly_Balance: 98792 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: 91049 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Annual_Income: 18940 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 13178 unique
+15:52:19 INFO    bt5151_credit_risk.graph        SSN: 12501 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Customer_ID: 12500 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Name: 10139 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Type_of_Loan: 6260 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: 4384 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Age: 1788 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: 749 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Num_of_Loan: 434 unique
+15:52:19 INFO    bt5151_credit_risk.graph        Credit_History_Age: 404 unique
+15:52:19 INFO    bt5151_credit_risk.graph      MNAR suspects (missingness correlates with target): 1
+15:52:19 INFO    bt5151_credit_risk.graph        Type_of_Loan: 11.4% missing, target dist diff=0.1951
+15:52:19 INFO    bt5151_credit_risk.graph      ANOVA top-5 features:
+15:52:19 INFO    bt5151_credit_risk.graph        Delay_from_due_date: F=11471.89 p=0.000000
+15:52:19 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: F=1903.07 p=0.000000
+15:52:19 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: F=105.30 p=0.000000
+15:52:19 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: F=6.26 p=0.001921
+15:52:19 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: F=5.50 p=0.004072
+15:52:19 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+15:52:55 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=o4-mini input_tokens=9691 output_tokens=5043 duration=36.10s
+15:52:55 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms', 'reasoning']
+15:52:55 INFO    bt5151_credit_risk.graph      col ID                        action=drop  
+15:52:55 INFO    bt5151_credit_risk.graph      col Customer_ID               action=drop  
+15:52:55 INFO    bt5151_credit_risk.graph      col Month                     action=keep  one_hot
+15:52:55 INFO    bt5151_credit_risk.graph      col Name                      action=drop  
+15:52:55 INFO    bt5151_credit_risk.graph      col Age                       action=keep  extract digits, convert to int, clip to [18, 100]
+15:52:55 INFO    bt5151_credit_risk.graph      col SSN                       action=drop  
+15:52:55 INFO    bt5151_credit_risk.graph      col Occupation                action=keep  replace '_______' with NaN, label
+15:52:55 INFO    bt5151_credit_risk.graph      col Annual_Income             action=keep  convert to float
+15:52:55 INFO    bt5151_credit_risk.graph      col Monthly_Inhand_Salary     action=keep  clip to [531.88, 13814.93]
+15:52:55 INFO    bt5151_credit_risk.graph      col Num_Bank_Accounts         action=keep  convert to int, clip to [0, 10]
+15:52:55 INFO    bt5151_credit_risk.graph      col Num_Credit_Card           action=keep  convert to int, clip to [0, 30]
+15:52:55 INFO    bt5151_credit_risk.graph      col Interest_Rate             action=keep  convert to int, clip to [1, 100]
+15:52:55 INFO    bt5151_credit_risk.graph      col Num_of_Loan               action=keep  extract digits and signs, convert to int, clip to [0, 10]
+15:52:55 INFO    bt5151_credit_risk.graph      col Type_of_Loan              action=keep  split on ',', strip whitespace, remove 'and ' prefix, one_hot
+15:52:55 INFO    bt5151_credit_risk.graph      col Delay_from_due_date       action=keep  convert to int, clip to [0, 61]
+15:52:55 INFO    bt5151_credit_risk.graph      col Num_of_Delayed_Payment    action=keep  extract digits, convert to int, clip to [0, 50]
+15:52:55 INFO    bt5151_credit_risk.graph      col Changed_Credit_Limit      action=keep  replace '_' with NaN, convert to float, clip to [-100, 100]
+15:52:55 INFO    bt5151_credit_risk.graph      col Num_Credit_Inquiries      action=keep  convert to int, clip to [0, 10]
+15:52:55 INFO    bt5151_credit_risk.graph      col Credit_Mix                action=keep  replace '_' with NaN, ordinal
+15:52:55 INFO    bt5151_credit_risk.graph      col Outstanding_Debt          action=keep  convert to float
+15:52:55 INFO    bt5151_credit_risk.graph      col Credit_Utilization_Ratio  action=keep  clip to [0, 100]
+15:52:55 INFO    bt5151_credit_risk.graph      col Credit_History_Age        action=keep  extract years and months, convert to total months as int
+15:52:55 INFO    bt5151_credit_risk.graph      col Payment_of_Min_Amount     action=keep  replace 'NM' with NaN, one_hot
+15:52:55 INFO    bt5151_credit_risk.graph      col Total_EMI_per_month       action=keep  clip to [0, 20000]
+15:52:55 INFO    bt5151_credit_risk.graph      col Amount_invested_monthly   action=keep  remove non-numeric chars, convert to float
+15:52:55 INFO    bt5151_credit_risk.graph      col Payment_Behaviour         action=keep  replace values not matching pattern '[A-Za-z_]+_[A-Za-z_]+' with NaN, one_hot
+15:52:55 INFO    bt5151_credit_risk.graph      col Monthly_Balance           action=keep  remove non-numeric chars, convert to float
+15:52:55 INFO    bt5151_credit_risk.graph      col Credit_Score              action=drop  
+15:52:55 INFO    bt5151_credit_risk.graph      column-transform reasoning:
+15:52:55 INFO    bt5151_credit_risk.graph        ID: Identifier column with 100k unique values; dropped per leakage policy.
+15:52:55 INFO    bt5151_credit_risk.graph        Customer_ID: Group identifier; dropped per leakage policy.
+15:52:55 INFO    bt5151_credit_risk.graph        Month: 8 unique month names, no inherent ordinal importance beyond one-hot encoding preserves seasonality effects; no missing v
+15:52:55 INFO    bt5151_credit_risk.graph        Name: PII field; dropped per leakage policy.
+15:52:55 INFO    bt5151_credit_risk.graph        Age: Stored as strings with anomalies ('-500', '28_'); plausible human ages in [18,100]; converted to int and clipped; median
+15:52:55 INFO    bt5151_credit_risk.graph        SSN: PII field; dropped per leakage policy.
+15:52:55 INFO    bt5151_credit_risk.graph        Occupation: 16 categories with placeholder '_______' (7062 occurrences); placeholder→NaN, mode imputation, high cardinality >10 enco
+15:52:55 INFO    bt5151_credit_risk.graph        Annual_Income: Numeric values stored as strings; converted to float; no implausible outliers detected; median imputation for any missin
+15:52:55 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: Float with p1=531.88, p99=13814.93, mean=4194; values beyond these percentiles are extreme but plausible tail; clipped t
+15:52:55 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: Min=-1 (invalid), max=1798; domain plausible ≤10; convert to int, clip to [0,10]; median imputation due to skew (skew=11
+15:52:55 INFO    bt5151_credit_risk.graph        Num_Credit_Card: Min=0, p99=849; users unlikely to hold >30 cards; convert to int, clip to [0,30]; median imputation for skew=8.46.
+15:52:55 INFO    bt5151_credit_risk.graph        Interest_Rate: Min=1,p99=2865; interest rates plausibly ≤100%; convert to int, clip to [1,100]; median imputation for skew=9.0.
+15:52:55 INFO    bt5151_credit_risk.graph        Num_of_Loan: '-100' appears in top values; extract numeric, convert to int, domain [0,10], clip to remove garbage; median imputation.
+15:52:55 INFO    bt5151_credit_risk.graph        Type_of_Loan: Multi-value comma-separated lists with 'and' conjunctions; split, strip whitespace, remove 'and ' prefix; missing values
+15:52:55 INFO    bt5151_credit_risk.graph        Delay_from_due_date: Min=-5 (early), p99=61, mean=21; negative delays reinterpreted as zero; clip to [0,61]; median imputation; highly discri
+15:52:55 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: Stored as strings with 'nan'; extract digits, convert to int, clip to [0,50]; missing treated as mode (0 or most frequen
+15:52:55 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: Strings with '_' placeholders; '_'→NaN, convert to float, clip to plausible [-100,100] given sample range (~5–11); media
+15:52:55 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: Min=0,p99=1109; consumers unlikely >10 inquiries; convert to int, clip to [0,10]; median imputation; skew=9.79, MI=0.111
+15:52:55 INFO    bt5151_credit_risk.graph        Credit_Mix: 4 categories with '_' placeholder; '_'→NaN, impute mode; semantic order Bad<Standard<Good, ordinal encoding preserves ra
+15:52:55 INFO    bt5151_credit_risk.graph        Outstanding_Debt: Strings of floats; convert to float; no extreme implausibles detected; median imputation.
+15:52:55 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: Floats in [20,50], p1=22.74,p99=42.45; clip to [0,100] to guard any parsing errors; median imputation; low MI but used i
+15:52:55 INFO    bt5151_credit_risk.graph        Credit_History_Age: Strings like 'X Years and Y Months'; parse to total months as int; missing (~9030 rows) imputed with median.
+15:52:55 INFO    bt5151_credit_risk.graph        Payment_of_Min_Amount: 3 values Yes/No/NM; 'NM' treated as missing, impute mode (Yes); unordered categories, one-hot encoding.
+15:52:55 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: Min=0,p99=56125,max=82331; EMIs rarely exceed 20000/month; clip to [0,20000]; median imputation; top MI feature (0.5471)
+15:52:55 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: Strings with non-numeric artifacts ('__10000__'); strip non-digits, convert to float; median imputation; high cardinalit
+15:52:55 INFO    bt5151_credit_risk.graph        Payment_Behaviour: 7 categories including garbage '!@9#%8'; invalid patterns→NaN, mode imputation; unordered categories with ≤10 values, on
+15:52:55 INFO    bt5151_credit_risk.graph        Monthly_Balance: Strings with non-numeric placeholders ('__-3333...__'); strip non-digits, convert to float; median imputation; high card
+15:52:55 INFO    bt5151_credit_risk.graph        Credit_Score: Target column; dropped from features per policy.
+15:52:55 INFO    run_stage      [stream] reached stop node 'column-transform-spec', halting
+15:52:55 INFO    run_stage  === Stage 'specs' completed in 51.6s ===
+15:52:55 INFO    run_stage  --- dataset-policy-spec ---
+15:52:55 INFO    run_stage    target_column: Credit_Score
+15:52:55 INFO    run_stage    task_type: multiclass_classification
+15:52:55 INFO    run_stage    split_strategy: {'type': 'grouped_holdout', 'test_size': 0.2, 'group_column': 'Customer_ID'}
+15:52:55 INFO    run_stage    rows: 100000, target_distribution: {'Standard': 53174, 'Poor': 28998, 'Good': 17828}
+15:52:55 INFO    run_stage  --- exploratory-data-analysis ---
+15:52:55 INFO    run_stage    high-correlation pairs (|r|>0.8): 0
+15:52:55 INFO    run_stage    highly skewed (|skew|>2): ['Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_Credit_Inquiries', 'Total_EMI_per_month']
+15:52:55 INFO    run_stage    high-cardinality (>20): ['ID', 'Monthly_Balance', 'Amount_invested_monthly', 'Annual_Income', 'Outstanding_Debt', 'SSN', 'Customer_ID', 'Name', 'Type_of_Loan', 'Changed_Credit_Limit', 'Age', 'Num_of_Delayed_Payment', 'Num_of_Loan', 'Credit_History_Age']
+15:52:55 INFO    run_stage    MNAR suspects: ['Type_of_Loan']
+15:52:55 INFO    run_stage    top discriminative features (mutual information):
+15:52:55 INFO    run_stage      Total_EMI_per_month: MI=0.5471
+15:52:55 INFO    run_stage      Monthly_Inhand_Salary: MI=0.5187
+15:52:55 INFO    run_stage      Interest_Rate: MI=0.1705
+15:52:55 INFO    run_stage      Delay_from_due_date: MI=0.1215
+15:52:55 INFO    run_stage      Num_Credit_Inquiries: MI=0.1114
+15:52:55 INFO    run_stage      Num_Credit_Card: MI=0.1048
+15:52:55 INFO    run_stage      Num_Bank_Accounts: MI=0.0995
+15:52:55 INFO    run_stage      Credit_Utilization_Ratio: MI=0.0000
+15:52:55 INFO    run_stage    top ANOVA features:
+15:52:55 INFO    run_stage      Delay_from_due_date: F=11471.89 (p=0.000000)
+15:52:55 INFO    run_stage      Monthly_Inhand_Salary: F=1903.07 (p=0.000000)
+15:52:55 INFO    run_stage      Credit_Utilization_Ratio: F=105.30 (p=0.000000)
+15:52:55 INFO    run_stage      Num_Credit_Inquiries: F=6.26 (p=0.001921)
+15:52:55 INFO    run_stage      Num_Bank_Accounts: F=5.50 (p=0.004072)
+15:52:55 INFO    run_stage  --- column-transform-spec ---
+15:52:55 INFO    run_stage    columns: 23 kept, 5 dropped
+15:52:55 INFO    run_stage    reasoning (28 columns):
+15:52:55 INFO    run_stage      ID: Identifier column with 100k unique values; dropped per leakage policy.
+15:52:55 INFO    run_stage      Customer_ID: Group identifier; dropped per leakage policy.
+15:52:55 INFO    run_stage      Month: 8 unique month names, no inherent ordinal importance beyond one-hot encoding preserves seasonality effects; no missing values observed.
+15:52:55 INFO    run_stage      Name: PII field; dropped per leakage policy.
+15:52:55 INFO    run_stage      Age: Stored as strings with anomalies ('-500', '28_'); plausible human ages in [18,100]; converted to int and clipped; median imputation for missing and invalid.
+15:52:55 INFO    run_stage      SSN: PII field; dropped per leakage policy.
+15:52:55 INFO    run_stage      Occupation: 16 categories with placeholder '_______' (7062 occurrences); placeholder→NaN, mode imputation, high cardinality >10 encoded via label.
+15:52:55 INFO    run_stage      Annual_Income: Numeric values stored as strings; converted to float; no implausible outliers detected; median imputation for any missing.
+15:52:55 INFO    run_stage      Monthly_Inhand_Salary: Float with p1=531.88, p99=13814.93, mean=4194; values beyond these percentiles are extreme but plausible tail; clipped to [531.88,13814.93], median imputation for NaN (~missing in 60% of rows).
+15:52:55 INFO    run_stage      Num_Bank_Accounts: Min=-1 (invalid), max=1798; domain plausible ≤10; convert to int, clip to [0,10]; median imputation due to skew (skew=11.2).
+15:52:55 INFO    run_stage  --- Token usage summary ---
+15:52:55 INFO    run_stage  Total LLM calls: 2
+15:52:55 INFO    run_stage  Total tokens: 19032 (input: 13844, output: 5188)
+15:52:55 INFO    run_stage  Total LLM duration: 40.56s
+15:52:55 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4153 out=145 4.46s
+15:52:55 INFO    run_stage    [column-transform-spec] model=o4-mini in=9691 out=5043 36.10s
+15:52:55 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_specs_20260410_155157.log

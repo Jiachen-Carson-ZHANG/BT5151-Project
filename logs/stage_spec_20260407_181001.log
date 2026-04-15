@@ -1,0 +1,126 @@
+18:10:01 INFO    run_stage  Stage: spec | Log file: /home/tough/BT5151 GroupProject/logs/stage_spec_20260407_181001.log
+18:10:03 INFO    run_stage  Loaded 100000 rows x 28 columns from /home/tough/BT5151 GroupProject/train.csv
+18:10:03 INFO    run_stage  --- dataset-policy-spec ---
+18:10:25 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o-mini input_tokens=2433 output_tokens=796 duration=21.49s
+18:10:44 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o-mini input_tokens=2433 output_tokens=647 duration=18.99s
+18:11:02 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o-mini input_tokens=2433 output_tokens=543 duration=17.71s
+18:11:02 INFO    run_stage  Policy spec:
+{
+  "task_type": "regression",
+  "target_column": "Credit_Score",
+  "group_column": null,
+  "identifier_columns": [
+    "ID",
+    "Customer_ID"
+  ],
+  "split_strategy": {
+    "train_size": 0.8,
+    "test_size": 0.2,
+    "validation_size": null,
+    "shuffle": true,
+    "stratify": false
+  },
+  "leakage_policy": {
+    "apply_leakage_policy": true,
+    "remove_identifiers": [
+      "ID",
+      "Customer_ID",
+      "SSN"
+    ],
+    "remove_future_information": [
+      "Month",
+      "Num_of_Delayed_Payment"
+    ]
+  },
+  "imbalance_policy": {
+    "apply_imbalance_policy": false
+  },
+  "preprocessing_steps": [
+    {
+      "action": "handle_missing_values",
+      "strategy": {
+        "columns": [
+          "Name",
+          "Monthly_Inhand_Salary",
+          "Num_of_Delayed_Payment",
+          "Type_of_Loan",
+          "Credit_History_Age",
+          "Amount_invested_monthly",
+          "Monthly_Balance"
+        ],
+        "imputation_method": "mean",
+        "exclude_columns": [
+          "ID",
+          "Customer_ID"
+        ]
+      }
+    },
+    {
+      "action": "remove_outliers",
+      "columns": [
+        "Age",
+        "Outstanding_Debt",
+        "Credit_Utilization_Ratio",
+        "Total_EMI_per_month"
+      ],
+      "method": "IQR"
+    },
+    {
+      "action": "convert_data_types",
+      "columns": {
+        "Age": "int",
+        "Annual_Income": "float",
+        "Monthly_Inhand_Salary": "float",
+        "Num_of_Loan": "int",
+        "Num_Delayed_Payment": "int",
+        "Changed_Credit_Limit": "float",
+        "Num_Credit_Inquiries": "int",
+        "Credit_Utilization_Ratio": "float",
+        "Credit_History_Age": "float"
+      }
+    },
+    {
+      "action": "feature_engineering",
+      "new_features": {
+        "Age_Band": {
+          "bins": [
+            0,
+            18,
+            25,
+            35,
+            45,
+            60,
+            100
+          ],
+          "labels": [
+            "<18",
+            "18-25",
+            "26-35",
+            "36-45",
+            "46-60",
+            ">60"
+          ]
+        },
+        "Total_Duration_Delays": {
+          "source": [
+            "Delay_from_due_date"
+          ],
+          "operation": "cumulative"
+        }
+      }
+    }
+  ]
+}
+18:11:02 INFO    run_stage  Profile (with target):
+{
+  "row_count": 100000,
+  "target_distribution": {
+    "Standard": 53174,
+    "Poor": 28998,
+    "Good": 17828
+  }
+}
+18:11:02 INFO    run_stage  --- column-transform-spec ---
+18:11:25 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o-mini input_tokens=2731 output_tokens=1059 duration=23.01s
+18:11:43 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o-mini input_tokens=2731 output_tokens=895 duration=18.53s
+18:12:13 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o-mini input_tokens=2731 output_tokens=1028 duration=29.71s

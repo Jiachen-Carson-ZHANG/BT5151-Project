@@ -1,0 +1,225 @@
+18:51:43 INFO    run_stage  Stage: spec | Log file: /home/tough/BT5151 GroupProject/logs/stage_spec_20260407_185143.log
+18:51:44 INFO    run_stage  Loaded 100000 rows x 28 columns from /home/tough/BT5151 GroupProject/train.csv
+18:51:44 INFO    run_stage  --- dataset-policy-spec ---
+18:51:55 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o-mini input_tokens=4153 output_tokens=149 duration=10.10s
+18:51:55 INFO    run_stage  Policy spec:
+{
+  "task_type": "multiclass_classification",
+  "target_column": "Credit_Score",
+  "group_column": "Customer_ID",
+  "identifier_columns": [
+    "ID",
+    "Customer_ID",
+    "SSN",
+    "Name"
+  ],
+  "split_strategy": {
+    "type": "grouped_holdout",
+    "test_size": 0.2,
+    "group_column": "Customer_ID"
+  },
+  "leakage_policy": {
+    "columns_to_drop": [
+      "ID",
+      "Customer_ID",
+      "SSN",
+      "Name"
+    ]
+  },
+  "imbalance_policy": {
+    "apply_imbalance_policy": true,
+    "strategy": "class_weight_balanced"
+  }
+}
+18:51:55 INFO    run_stage  Profile (with target):
+{
+  "row_count": 100000,
+  "target_distribution": {
+    "Standard": 53174,
+    "Poor": 28998,
+    "Good": 17828
+  }
+}
+18:51:55 INFO    run_stage  --- column-transform-spec ---
+18:52:35 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o-mini input_tokens=2839 output_tokens=910 duration=39.68s
+18:52:35 INFO    run_stage  Column transform spec:
+{
+  "transforms": {
+    "ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Customer_ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "one_hot"
+    },
+    "Name": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Age": {
+      "action": "keep",
+      "cleaning": "convert to int, deal with negative values",
+      "imputation": "median",
+      "encoding": null
+    },
+    "SSN": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Occupation": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Annual_Income": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Monthly_Inhand_Salary": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Bank_Accounts": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Card": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Interest_Rate": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Loan": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Type_of_Loan": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "one_hot"
+    },
+    "Delay_from_due_date": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Delayed_Payment": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Changed_Credit_Limit": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Inquiries": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Mix": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "one_hot"
+    },
+    "Outstanding_Debt": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Utilization_Ratio": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_History_Age": {
+      "action": "keep",
+      "cleaning": "convert to float, extract years and months",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_of_Min_Amount": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "one_hot"
+    },
+    "Total_EMI_per_month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Amount_invested_monthly": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_Behaviour": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "one_hot"
+    },
+    "Monthly_Balance": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Score": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": "label"
+    }
+  }
+}
+18:52:35 INFO    run_stage  Stage 'spec' completed in 52.1s
+18:52:35 INFO    run_stage  --- Token usage summary ---
+18:52:35 INFO    run_stage  Total LLM calls: 2
+18:52:35 INFO    run_stage  Total tokens: 8051 (input: 6992, output: 1059)
+18:52:35 INFO    run_stage  Total LLM duration: 49.78s
+18:52:35 INFO    run_stage    [dataset-policy-spec] model=gpt-4o-mini in=4153 out=149 10.10s
+18:52:35 INFO    run_stage    [column-transform-spec] model=gpt-4o-mini in=2839 out=910 39.68s
+18:52:35 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_spec_20260407_185143.log

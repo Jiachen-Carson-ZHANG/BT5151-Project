@@ -1168,9 +1168,9 @@ def package_analysis_bundle_node(state: CreditRiskState):
         numeric_artifacts["ale"] = state.global_xai_results.get("ale")
         numeric_artifacts["methods_used"] = state.global_xai_results.get("methods_used", [])
 
-    # Save both to disk (timestamped) for cross-run comparison.
+    # Save both to disk. Use local YYYYMMDD_HHMMSS to align with log file naming convention.
     run_root = Path(state.raw_dataset_path).resolve().parent
-    timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     full_on_disk = dict(bundle)
     full_on_disk["numeric_artifacts"] = numeric_artifacts
     bundle_path = run_root / f"analysis_bundle_{timestamp_str}.json"

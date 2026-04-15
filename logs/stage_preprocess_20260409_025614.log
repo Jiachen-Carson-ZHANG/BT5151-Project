@@ -1,0 +1,390 @@
+02:56:14 INFO    run_stage  Stage: preprocess | Log file: /home/tough/BT5151 GroupProject/logs/stage_preprocess_20260409_025614.log
+02:56:15 INFO    run_stage  Loaded 100000 rows x 28 columns from /home/tough/BT5151 GroupProject/train.csv
+02:56:16 INFO    run_stage  --- dataset-policy-spec ---
+02:56:21 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=145 duration=5.41s
+02:56:21 INFO    run_stage  Policy spec:
+{
+  "task_type": "multiclass_classification",
+  "target_column": "Credit_Score",
+  "group_column": "Customer_ID",
+  "identifier_columns": [
+    "ID",
+    "Customer_ID",
+    "SSN",
+    "Name"
+  ],
+  "split_strategy": {
+    "type": "grouped_holdout",
+    "test_size": 0.2,
+    "group_column": "Customer_ID"
+  },
+  "leakage_policy": {
+    "columns_to_drop": [
+      "ID",
+      "Customer_ID",
+      "SSN",
+      "Name"
+    ]
+  },
+  "imbalance_policy": {
+    "apply_imbalance_policy": false,
+    "strategy": null
+  }
+}
+02:56:22 INFO    run_stage  Profile (with target):
+{
+  "row_count": 100000,
+  "target_distribution": {
+    "Standard": 53174,
+    "Poor": 28998,
+    "Good": 17828
+  }
+}
+02:56:22 INFO    run_stage  --- column-transform-spec ---
+02:56:34 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o input_tokens=2936 output_tokens=1125 duration=12.46s
+02:56:34 INFO    run_stage  Column transform spec:
+{
+  "transforms": {
+    "ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Customer_ID": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "ordinal"
+    },
+    "Name": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Age": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "SSN": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    },
+    "Occupation": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Annual_Income": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Monthly_Inhand_Salary": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Bank_Accounts": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Card": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Interest_Rate": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Loan": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Type_of_Loan": {
+      "action": "keep",
+      "cleaning": "split on delimiter, then encode individual values",
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Delay_from_due_date": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_of_Delayed_Payment": {
+      "action": "keep",
+      "cleaning": "convert to int",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Changed_Credit_Limit": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Num_Credit_Inquiries": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Mix": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Outstanding_Debt": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Utilization_Ratio": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_History_Age": {
+      "action": "keep",
+      "cleaning": "extract years and months, convert to total months",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_of_Min_Amount": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Total_EMI_per_month": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "median",
+      "encoding": null
+    },
+    "Amount_invested_monthly": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Payment_Behaviour": {
+      "action": "keep",
+      "cleaning": null,
+      "imputation": "mode",
+      "encoding": "one_hot"
+    },
+    "Monthly_Balance": {
+      "action": "keep",
+      "cleaning": "convert to float",
+      "imputation": "median",
+      "encoding": null
+    },
+    "Credit_Score": {
+      "action": "drop",
+      "cleaning": null,
+      "imputation": null,
+      "encoding": null
+    }
+  }
+}
+02:56:34 INFO    run_stage  --- generate-preprocessing-code ---
+02:56:53 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=4839 output_tokens=1812 duration=18.80s
+02:56:53 INFO    run_stage  Entrypoint: run_preprocessing
+02:56:53 INFO    run_stage  Generated code (5944 chars):
+import json
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from sklearn.model_selection import GroupShuffleSplit
+
+def run_preprocessing(raw_df, workspace_path):
+    workspace_path = Path(workspace_path)
+    df = raw_df.copy()
+    
+    # Extract target before any transforms
+    target = df['Credit_Score'].copy()
+    
+    # Drop identifier and target columns
+    df.drop(columns=['ID', 'Customer_ID', 'Name', 'SSN', 'Credit_Score'], inplace=True)
+    
+    # Impute and clean specific columns
+    df['Age'] = pd.to_numeric(df['Age'], errors='coerce').clip(lower=0)
+    age_median = df['Age'].median()
+    df['Age'].fillna(age_median, inplace=True)
+
+    df['Annual_Income'] = pd.to_numeric(df['Annual_Income'], errors='coerce')
+    annual_income_median = df['Annual_Income'].median()
+    df['Annual_Income'].fillna(annual_income_median, inplace=True)
+
+    df['Monthly_Inhand_Salary'].fillna(df['Monthly_Inhand_Salary'].median(), inplace=True)
+
+    df['Num_Bank_Accounts'] = pd.to_numeric(df['Num_Bank_Accounts'], errors='coerce')
+    df['Num_Bank_Accounts'].fillna(df['Num_Bank_Accounts'].median(), inplace=True)
+
+    df['Num_Credit_Card'] = pd.to_numeric(df['Num_Credit_Card'], errors='coerce')
+    df['Num_Credit_Card'].fillna(df['Num_Credit_Card'].median(), inplace=True)
+
+    df['Interest_Rate'] = pd.to_numeric(df['Interest_Rate'], errors='coerce')
+    df['Interest_Rate'].fillna(df['Interest_Rate'].median(), inplace=True)
+
+    df['Num_of_Loan'] = pd.to_numeric(df['Num_of_Loan'], errors='coerce')
+    df['Num_of_Loan'].fillna(df['Num_of_Loan'].median(), inplace=True)
+    
+    df['Delay_from_due_date'] = pd.to_numeric(df['Delay_from_due_date'], errors='coerce')
+    df['Delay_from_due_date'].fillna(df['Delay_from_due_date'].median(), inplace=True)
+
+    df['Num_of_Delayed_Payment'] = pd.to_numeric(df['Num_of_Delayed_Payment'], errors='coerce')
+    df['Num_of_Delayed_Payment'].fillna(df['Num_of_Delayed_Payment'].median(), inplace=True)
+
+    df['Changed_Credit_Limit'] = pd.to_numeric(df['Changed_Credit_Limit'], errors='coerce')
+    df['Changed_Credit_Limit'].fillna(df['Changed_Credit_Limit'].median(), inplace=True)
+
+    df['Num_Credit_Inquiries'].fillna(df['Num_Credit_Inquiries'].median(), inplace=True)
+
+    df['Outstanding_Debt'] = pd.to_numeric(df['Outstanding_Debt'], errors='coerce')
+    df['Outstanding_Debt'].fillna(df['Outstanding_Debt'].median(), inplace=True)
+
+    # Convert Credit History Age to total months
+    df['Credit_History_Age'] = df['Credit_History_Age'].str.extract(r'(\d+)\sYears?\sand\s(\d+)\sMonths?').astype(float)
+    df['Credit_History_Age'] = df['Credit_History_Age'][0] * 12 + df['Credit_History_Age'][1]
+    df['Credit_History_Age'].fillna(df['Credit_History_Age'].median(), inplace=True)
+
+    df['Amount_invested_monthly'] = pd.to_numeric(df['Amount_invested_monthly'], errors='coerce')
+    df['Amount_invested_monthly'].fillna(df['Amount_invested_monthly'].median(), inplace=True)
+
+    df['Monthly_Balance'] = pd.to_numeric(df['Monthly_Balance'], errors='coerce')
+    df['Monthly_Balance'].fillna(df['Monthly_Balance'].median(), inplace=True)
+
+    # Impute categorical columns
+    df['Month'].fillna(df['Month'].mode()[0], inplace=True)
+    df['Occupation'].fillna(df['Occupation'].mode()[0], inplace=True)
+    df['Credit_Mix'].fillna(df['Credit_Mix'].mode()[0], inplace=True)
+    df['Payment_of_Min_Amount'].fillna(df['Payment_of_Min_Amount'].mode()[0], inplace=True)
+    df['Payment_Behaviour'].fillna(df['Payment_Behaviour'].mode()[0], inplace=True)
+
+    # Convert Month to ordinal
+    month_order = {'January': 1, 'February': 2, 'March': 3, 'April': 4, 'May': 5,
+                  'June': 6, 'July': 7, 'August': 8, 'September': 9,
+                  'October': 10, 'November': 11, 'December': 12}
+    df['Month'] = df['Month'].map(month_order)
+
+    # Split Type_of_Loan and apply one-hot encoding
+    df = df.drop(['Type_of_Loan'], axis=1).join(df['Type_of_Loan'].str.get_dummies(sep=','))
+
+    # Apply one-hot encoding
+    categorical_cols = ['Occupation', 'Credit_Mix', 'Payment_of_Min_Amount', 'Payment_Behaviour']
+    df = pd.get_dummies(df, columns=categorical_cols, drop_first=False)
+
+    # Save cleaned frame (before encoding)
+    df.to_csv(workspace_path / 'cleaned_frame.csv', index=False)
+    
+    # Encode remaining categorical columns
+    features = df.drop(columns=['Month'])
+    
+    # Save feature frame and target
+    features.to_csv(workspace_path / 'feature_frame.csv', index=False)
+    target.to_frame().to_csv(workspace_path / 'target.csv', index=False)
+    
+    # Split
+    gss = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
+    train_idx, test_idx = next(gss.split(features, groups=raw_df['Customer_ID']))
+    manifest = {'train_indices': train_idx.tolist(), 'test_indices': test_idx.tolist()}
+    (workspace_path / 'split_manifest.json').write_text(json.dumps(manifest))
+    
+    # Report
+    report = {'columns_dropped': ['ID', 'Customer_ID', 'Name', 'SSN', 'Credit_Score'], 'imputation': {
+        'Age': 'median', 'Annual_Income': 'median', 'Monthly_Inhand_Salary': 'median',
+        'Num_Bank_Accounts': 'median', 'Num_Credit_Card': 'median', 'Interest_Rate': 'median',
+        'Num_of_Loan': 'median', 'Delay_from_due_date': 'median', 'Num_of_Delayed_Payment': 'median',
+        'Changed_Credit_Limit': 'median', 'Num_Credit_Inquiries': 'median',
+        'Outstanding_Debt': 'median', 'Credit_History_Age': 'median', 'Amount_invested_monthly': 'median',
+        'Monthly_Balance': 'median', 'Month': 'mode', 'Occupation': 'mode',
+        'Credit_Mix': 'mode', 'Payment_of_Min_Amount': 'mode', 'Payment_Behaviour': 'mode'
+    }, 'encoding': {
+        'Month': 'ordinal', 'Occupation': 'one_hot', 'Type_of_Loan': 'one_hot',
+        'Credit_Mix': 'one_hot', 'Payment_of_Min_Amount': 'one_hot', 'Payment_Behaviour': 'one_hot'
+        }, 'rows': len(df)}
+    (workspace_path / 'preprocessing_report.json').write_text(json.dumps(report))
+
+02:56:53 INFO    run_stage  --- inspect-preprocessing-code ---
+02:56:53 INFO    run_stage  Inspection passed: True
+02:56:53 INFO    run_stage  --- execute-generated-preprocessing ---
+02:57:01 INFO    run_stage  Execution returncode: 1, timed_out: False
+02:57:01 WARNING run_stage  stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/generated_preprocessing.py:20: ChainedAssignmentError: A value is being set on a copy of a DataFrame or Series through chained assignment using an inplace method.
+Such inplace method never works to update the original DataFrame or Series, because the intermediate object on which we are setting values always behaves as a copy (due to Copy-on-Write).
+
+For example, when doing 'df[col].method(value, inplace=True)', try using 'df.method({col: value}, inplace=True)' instead, to perform the operation inplace on the original object, or try to avoid an inplace operation using 'df[col] = df[col].method(value)'.
+
+See the documentation for a more detailed explanation: https://pandas.pydata.org/pandas-docs/stable/user_guide/copy_on_write.html
+  df['Age'].fillna(age_median, inplace=True)
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/generated_preprocessing.py:24: ChainedAssignmentError: A value is being set on a copy of a DataFrame or Series through chained assignment using an inplace method.
+Such inplace method never works to update the original DataFrame or Series, because the intermediate object on which we are setting values always behaves as a copy (due to Copy-on-Write).
+
+For example, when doing 'df[col].method(value, inplace=True)', try using 'df.method({col: value}, inplace=True)' instead, to perform the operation inplace on the original object, or try to avoid an inplace operation using 'df[col] = df[col].method(value)'.
+
+See the documentation for a more detailed explanation: https://pandas.pydata.org/pandas-docs/stable/user_guide/copy_on_write.html
+  df['Annual_Income'].fillna(annual_income_median, inplace=True)
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/generated_preprocessing.py:26: ChainedAssignmentError: A value is being set on a copy of a DataFrame or Series through chained assignment using an inplace method.
+Such inplace method never works to update the original DataFrame or Series, because the intermediate object on which we are setting values always behaves as a copy (due to Copy-on-Write).
+
+For example, when doing 'df[col].method(value, inplace=True)', try using 'df.method({col: value}, inplace=True)' instead, to perform the operation inplace on the original object, or try to avoid an inplace operation using 'df[col] = df[col].method(value)'.
+
+See the documentation for a more detailed explanation: https://pandas.pydata.org/pandas-docs/stable/user_guide/copy_on_write.html
+  
+02:57:01 WARNING run_stage  Missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+02:57:01 INFO    run_stage  --- validate-preprocessing-output ---
+02:57:01 INFO    run_stage  Validation passed: False
+02:57:01 INFO    run_stage  Checks: {
+  "split_manifest_exists": false,
+  "target_file_exists": false,
+  "feature_frame_readable": false,
+  "target_excluded": false,
+  "feature_frame_non_empty": false,
+  "group_overlap_zero": false
+}
+02:57:01 WARNING run_stage    [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/split_manifest.json.
+02:57:01 WARNING run_stage    [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/target.csv.
+02:57:01 WARNING run_stage    [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_c37618a5113b4db3987f3dc0e71a93da/feature_frame.csv.
+02:57:01 WARNING run_stage    [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+02:57:01 WARNING run_stage    [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+02:57:01 WARNING run_stage    [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+02:57:01 INFO    run_stage  Stage 'preprocess' completed in 46.7s
+02:57:01 INFO    run_stage  --- Token usage summary ---
+02:57:01 INFO    run_stage  Total LLM calls: 3
+02:57:01 INFO    run_stage  Total tokens: 15010 (input: 11928, output: 3082)
+02:57:01 INFO    run_stage  Total LLM duration: 36.67s
+02:57:01 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4153 out=145 5.41s
+02:57:01 INFO    run_stage    [column-transform-spec] model=gpt-4o in=2936 out=1125 12.46s
+02:57:01 INFO    run_stage    [generate-preprocessing-code] model=gpt-4o in=4839 out=1812 18.80s
+02:57:01 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_preprocess_20260409_025614.log

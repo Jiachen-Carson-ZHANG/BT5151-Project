@@ -1,0 +1,189 @@
+22:36:50 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/logs/stage_full_20260409_223650.log
+22:36:54 INFO    run_stage  === Full pipeline (row_index=42) ===
+22:36:54 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+22:36:55 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+22:37:00 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4153 output_tokens=142 duration=4.12s
+22:37:00 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'leakage_policy', 'imbalance_policy']
+22:37:00 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+22:37:00 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+22:37:08 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=gpt-4o input_tokens=2934 output_tokens=1107 duration=8.66s
+22:37:08 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms']
+22:37:08 INFO    bt5151_credit_risk.graph  >>> generate-preprocessing-code
+22:37:29 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=5785 output_tokens=1677 duration=20.94s
+22:37:29 INFO    bt5151_credit_risk.graph      entrypoint: run_preprocessing, code length: 5326 chars
+22:37:29 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 1/5)
+22:37:29 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+22:37:29 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+22:37:38 INFO    bt5151_credit_risk.graph      returncode: 1, timed_out: False, success: False
+22:37:38 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+Traceback (most recent call last):
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/_execute_generated_preprocessing.py", line 28, in <module>
+    main()
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/_execute_generated_preprocessing.py", line 22, in main
+    result = entrypoint(raw_df, workspace_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/generated_preprocessing.py", line 41, in run_preprocessing
+    df['Credit_History_Age'] = df['Credit_History_Age'].str.extract(r'(\\d+) Years and (\\d+) Months').astype(float)
+    ~~^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/frame.py", line 4662, in __setitem__
+    self._set_item_frame_value(key, value)
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/frame.py", line 4786, in _set_item_frame_value
+    raise ValueError("Columns must be same length as key")
+ValueError: Columns must be same length as key
+
+22:37:38 WARNING bt5151_credit_risk.graph      missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+22:37:38 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+22:37:38 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': False, 'target_excluded': False, 'feature_frame_non_empty': False, 'group_overlap_zero': False}
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/split_manifest.json.
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/target.csv.
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_d2ac3e8fd6784766b9b9efb4f2fe713d/feature_frame.csv.
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+22:37:38 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+22:37:38 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+22:37:38 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+22:37:38 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 1/5)
+22:37:57 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=gpt-4o input_tokens=5277 output_tokens=1648 duration=19.22s
+22:37:57 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 2/5)
+22:37:57 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+22:37:57 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+22:38:12 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+22:38:12 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_6e018ac29b24472f873b220e8167bc4c/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+22:38:12 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+22:38:13 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+22:38:14 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 73 cols
+22:38:14 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+22:38:14 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+22:38:25 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=12373 output_tokens=590 duration=9.02s
+22:38:25 INFO    bt5151_credit_risk.graph      verdict: needs_repair, issues: 8
+22:38:25 WARNING bt5151_credit_risk.graph      [critical/distribution_sanity] Age: Age has implausible values with min=-500 and max=8698.
+22:38:25 WARNING bt5151_credit_risk.graph      [critical/distribution_sanity] Annual_Income: Annual_Income has an implausible max value of 24198062.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/distribution_sanity] Num_Bank_Accounts: Num_Bank_Accounts has a minimum value of -1 and max=1798, which are not plausible.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/distribution_sanity] Num_of_Loan: Num_of_Loan has a minimum value of -100 which is not plausible.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Type_of_Loan: Delimiter split artifacts present such as 'and Auto Loan'.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Occupation: Contains garbage category names like 'Occupation________'.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Credit_Mix: Contains garbage category names like 'Credit_Mix__'.
+22:38:25 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Payment_Behaviour: Contains garbage category names like 'Payment_Behaviour_!@9#%8'.
+22:38:25 INFO    bt5151_credit_risk.graph      summary: Critical distribution issues in Age and Annual_Income. Major encoding issues with placeholder category names in Occupation, Credit_Mix, and Payment_Behaviour. Needs repair.
+22:38:25 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 2/5)
+22:38:53 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=gpt-4o input_tokens=4984 output_tokens=2037 duration=28.23s
+22:38:53 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 3/5)
+22:38:53 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+22:38:53 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+22:39:07 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+22:39:07 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_93ff2b23760341df94b5a100568d5696/generated_preprocessing.py:94: SyntaxWarning: invalid escape sequence '\w'
+  df['Payment_Behaviour'] = df['Payment_Behaviour'].str.replace('[^\w\s]', '', regex=True)
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_93ff2b23760341df94b5a100568d5696/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+22:39:07 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+22:39:08 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+22:39:08 WARNING bt5151_credit_risk.graph      quality warning: [cleaned_frame_has_nans] cleaned_frame.csv still has NaN values (sampled first 1000 rows: 303 NaNs). Imputation may be incomplete.
+22:39:09 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 64 cols
+22:39:09 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+22:39:09 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+22:39:14 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=11870 output_tokens=240 duration=4.24s
+22:39:14 INFO    bt5151_credit_risk.graph      verdict: needs_repair, issues: 3
+22:39:14 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Occupation: Contains garbage category names like 'Occupation_'.
+22:39:14 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Credit_Mix: Contains garbage category names like 'Credit_Mix_'.
+22:39:14 WARNING bt5151_credit_risk.graph      [major/encoding_quality] Payment_Behaviour: Contains garbage category names like 'Payment_Behaviour_98'.
+22:39:14 INFO    bt5151_credit_risk.graph      summary: Critical distribution issues resolved. Major encoding issues remain with placeholder category names in Occupation, Credit_Mix, and Payment_Behaviour. Needs repair.
+22:39:14 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 3/5)
+22:39:35 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=gpt-4o input_tokens=5229 output_tokens=2181 duration=20.75s
+22:39:35 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 4/5)
+22:39:35 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+22:39:35 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+22:39:49 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+22:39:49 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_3b647518d5a14dc1936dba05f02d004d/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+22:39:49 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+22:39:50 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'feature_frame_readable': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+22:39:50 WARNING bt5151_credit_risk.graph      quality warning: [remaining_nans] Feature frame has 100000 NaN values across 1 columns.
+22:39:50 WARNING bt5151_credit_risk.graph      quality warning: [constant_features] 1 constant feature(s) detected: ['Credit_History_Age']. These add no predictive value.
+22:39:50 WARNING bt5151_credit_risk.graph      quality warning: [cleaned_frame_has_nans] cleaned_frame.csv still has NaN values (sampled first 1000 rows: 1000 NaNs). Imputation may be incomplete.
+22:39:51 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 64 cols
+22:39:51 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+22:39:51 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+22:39:54 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=11513 output_tokens=52 duration=1.77s
+22:39:54 INFO    bt5151_credit_risk.graph      verdict: pass, issues: 0
+22:39:54 INFO    bt5151_credit_risk.graph      summary: All previously flagged major encoding issues related to placeholder patterns have been resolved. No critical issues remain, and the dataset is ready for training.
+22:39:54 INFO    bt5151_credit_risk.graph  >>> generate-feature-engineering-code
+22:40:05 INFO    bt5151_credit_risk.llm  LLM call [generate-feature-engineering-code] model=gpt-4o input_tokens=12384 output_tokens=1007 duration=11.03s
+22:40:05 INFO    bt5151_credit_risk.graph      entrypoint: engineer_features, code length: 3544 chars
+22:40:05 INFO    bt5151_credit_risk.graph  >>> inspect-feature-engineering-code (attempt 1/3)
+22:40:05 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+22:40:05 INFO    bt5151_credit_risk.graph  >>> execute-feature-engineering
+22:40:15 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+22:40:15 INFO    bt5151_credit_risk.graph  >>> validate-feature-engineering
+22:40:16 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'train_file_exists': True, 'test_file_exists': True, 'report_file_exists': True, 'train_readable': True, 'train_row_count_match': True, 'test_readable': True, 'test_row_count_match': True, 'no_nans_in_train': True, 'no_nans_in_test': True, 'features_non_empty': True, 'max_feature_cap': True, 'column_alignment': True}
+22:40:17 INFO    bt5151_credit_risk.graph      features: 64 → 65 cols
+22:40:17 INFO    bt5151_credit_risk.graph  >>> train-models
+22:42:33 INFO    bt5151_credit_risk.graph      trained models: ['logistic_regression', 'random_forest', 'xgboost']
+22:42:33 INFO    bt5151_credit_risk.graph  >>> evaluate-models
+22:42:35 INFO    bt5151_credit_risk.graph      logistic_regression: accuracy=0.6301 macro_f1=0.6265
+22:42:35 INFO    bt5151_credit_risk.graph      random_forest: accuracy=0.6955 macro_f1=0.6696
+22:42:35 INFO    bt5151_credit_risk.graph      xgboost: accuracy=0.6979 macro_f1=0.6736
+22:42:35 INFO    bt5151_credit_risk.graph  >>> select-model
+22:42:35 INFO    bt5151_credit_risk.graph      selected: xgboost — Selected xgboost based on stronger macro_f1 and weighted_f1.
+22:42:35 INFO    bt5151_credit_risk.graph  >>> run-inference
+22:42:35 ERROR   run_stage  Pipeline failed
+Traceback (most recent call last):
+  File "/home/tough/BT5151 GroupProject/run_stage.py", line 176, in run_full
+    result = graph.invoke({
+             ^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 3309, in invoke
+    for chunk in self.stream(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/main.py", line 2736, in stream
+    for _ in runner.tick(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/_runner.py", line 167, in tick
+    run_with_retry(
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/pregel/_retry.py", line 126, in run_with_retry
+    return task.proc.invoke(task.input, config)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 656, in invoke
+    input = context.run(step.invoke, input, config, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/langgraph/_internal/_runnable.py", line 400, in invoke
+    ret = self.func(*args, **kwargs)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/src/bt5151_credit_risk/graph.py", line 428, in run_inference_node
+    probabilities = model.predict_proba(input_frame)[0]
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/xgboost/sklearn.py", line 1712, in predict_proba
+    class_probs = super().predict(
+                  ^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/xgboost/sklearn.py", line 1248, in predict
+    predts = self.get_booster().inplace_predict(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/xgboost/core.py", line 2514, in inplace_predict
+    self._validate_features(fns)
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/xgboost/core.py", line 3079, in _validate_features
+    raise ValueError(msg.format(self.feature_names, feature_names))
+ValueError: feature_names mismatch: ['Age', 'Annual_Income', 'Monthly_Inhand_Salary', 'Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_of_Loan', 'Delay_from_due_date', 'Num_of_Delayed_Payment', 'Changed_Credit_Limit', 'Num_Credit_Inquiries', 'Outstanding_Debt', 'Credit_Utilization_Ratio', 'Total_EMI_per_month', 'Amount_invested_monthly', 'Monthly_Balance', 'Auto Loan', 'Credit-Builder Loan', 'Debt Consolidation Loan', 'Home Equity Loan', 'Mortgage Loan', 'Not Specified', 'Payday Loan', 'Personal Loan', 'Student Loan', 'Month_April', 'Month_August', 'Month_February', 'Month_January', 'Month_July', 'Month_June', 'Month_March', 'Month_May', 'Occupation_Accountant', 'Occupation_Architect', 'Occupation_Developer', 'Occupation_Doctor', 'Occupation_Engineer', 'Occupation_Entrepreneur', 'Occupation_Journalist', 'Occupation_Lawyer', 'Occupation_Manager', 'Occupation_Mechanic', 'Occupation_MediaManager', 'Occupation_Musician', 'Occupation_Scientist', 'Occupation_Teacher', 'Occupation_Unknown', 'Occupation_Writer', 'Credit_Mix_Bad', 'Credit_Mix_Good', 'Credit_Mix_Standard', 'Credit_Mix_Unknown', 'Payment_of_Min_Amount_NM', 'Payment_of_Min_Amount_No', 'Payment_of_Min_Amount_Yes', 'Payment_Behaviour_98', 'Payment_Behaviour_High_spent_Large_value_payments', 'Payment_Behaviour_High_spent_Medium_value_payments', 'Payment_Behaviour_High_spent_Small_value_payments', 'Payment_Behaviour_Low_spent_Large_value_payments', 'Payment_Behaviour_Low_spent_Medium_value_payments', 'Payment_Behaviour_Low_spent_Small_value_payments', 'debt_to_income_ratio', 'emi_to_salary_ratio'] ['Age', 'Annual_Income', 'Monthly_Inhand_Salary', 'Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_of_Loan', 'Delay_from_due_date', 'Num_of_Delayed_Payment', 'Changed_Credit_Limit', 'Num_Credit_Inquiries', 'Outstanding_Debt', 'Credit_Utilization_Ratio', 'Credit_History_Age', 'Total_EMI_per_month', 'Amount_invested_monthly', 'Monthly_Balance', 'Auto Loan', 'Credit-Builder Loan', 'Debt Consolidation Loan', 'Home Equity Loan', 'Mortgage Loan', 'Not Specified', 'Payday Loan', 'Personal Loan', 'Student Loan', 'Month_April', 'Month_August', 'Month_February', 'Month_January', 'Month_July', 'Month_June', 'Month_March', 'Month_May', 'Occupation_Accountant', 'Occupation_Architect', 'Occupation_Developer', 'Occupation_Doctor', 'Occupation_Engineer', 'Occupation_Entrepreneur', 'Occupation_Journalist', 'Occupation_Lawyer', 'Occupation_Manager', 'Occupation_Mechanic', 'Occupation_MediaManager', 'Occupation_Musician', 'Occupation_Scientist', 'Occupation_Teacher', 'Occupation_Unknown', 'Occupation_Writer', 'Credit_Mix_Bad', 'Credit_Mix_Good', 'Credit_Mix_Standard', 'Credit_Mix_Unknown', 'Payment_of_Min_Amount_NM', 'Payment_of_Min_Amount_No', 'Payment_of_Min_Amount_Yes', 'Payment_Behaviour_98', 'Payment_Behaviour_High_spent_Large_value_payments', 'Payment_Behaviour_High_spent_Medium_value_payments', 'Payment_Behaviour_High_spent_Small_value_payments', 'Payment_Behaviour_Low_spent_Large_value_payments', 'Payment_Behaviour_Low_spent_Medium_value_payments', 'Payment_Behaviour_Low_spent_Small_value_payments']
+expected emi_to_salary_ratio, debt_to_income_ratio in input data
+training data did not have the following fields: Credit_History_Age
+During task with name 'run-inference' and id '2afdd5da-b317-811f-ba94-79c250847a4c'
+22:42:35 INFO    run_stage  Stage 'full' completed in 345.6s
+22:42:35 INFO    run_stage  --- Token usage summary ---
+22:42:35 INFO    run_stage  Total LLM calls: 10
+22:42:35 INFO    run_stage  Total tokens: 87183 (input: 76502, output: 10681)
+22:42:35 INFO    run_stage  Total LLM duration: 127.98s
+22:42:35 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4153 out=142 4.12s
+22:42:35 INFO    run_stage    [column-transform-spec] model=gpt-4o in=2934 out=1107 8.66s
+22:42:35 INFO    run_stage    [generate-preprocessing-code] model=gpt-4o in=5785 out=1677 20.94s
+22:42:35 INFO    run_stage    [repair-preprocessing-code] model=gpt-4o in=5277 out=1648 19.22s
+22:42:35 INFO    run_stage    [audit-preprocessing] model=gpt-4o in=12373 out=590 9.02s
+22:42:35 INFO    run_stage    [repair-preprocessing-code] model=gpt-4o in=4984 out=2037 28.23s
+22:42:35 INFO    run_stage    [audit-preprocessing] model=gpt-4o in=11870 out=240 4.24s
+22:42:35 INFO    run_stage    [repair-preprocessing-code] model=gpt-4o in=5229 out=2181 20.75s
+22:42:35 INFO    run_stage    [audit-preprocessing] model=gpt-4o in=11513 out=52 1.77s
+22:42:35 INFO    run_stage    [generate-feature-engineering-code] model=gpt-4o in=12384 out=1007 11.03s
+22:42:35 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/logs/stage_full_20260409_223650.log
