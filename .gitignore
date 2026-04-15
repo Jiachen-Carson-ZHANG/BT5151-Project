@@ -18,6 +18,7 @@ credit_score_model_ready.xlsx
 generated_preprocessing_runs/
 feature_engineering_runs/
 /logs/
+/analysis_bundle_*.json
 
 # Local tool configs
 .codex

@@ -553,6 +553,27 @@ def test_validate_preprocessing_output_reports_missing_target_file(sample_frame,
     assert any(error["rule"] == "target_file_exists" for error in result["errors"])
 
 
+def test_validate_preprocessing_output_reports_mangled_duplicate_columns(sample_frame, tmp_path):
+    generated_code = _generated_preprocessing_code(
+        "cleaned.drop(columns=['Credit_Score'])",
+        {"train_indices": [0, 1, 2, 3], "test_indices": [4, 5]},
+    )
+
+    execution_result = execute_generated_preprocessing(sample_frame, generated_code, tmp_path)
+    feature_frame_path = Path(execution_result["artifacts"]["feature_frame.csv"])
+    feature_frame_path.write_text("A,A\n1,0\n0,1\n1,0\n0,1\n1,0\n0,1\n", encoding="utf-8")
+
+    result = validate_preprocessing_output(
+        execution_result,
+        _sample_policy_spec(),
+        _sample_column_transform_spec(),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["no_mangled_duplicate_columns"] is False
+    assert any(error["rule"] == "no_mangled_duplicate_columns" for error in result["errors"])
+
+
 def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_frame, tmp_path):
     generated_code = _generated_preprocessing_code(
         "cleaned.drop(columns=['Credit_Score'])",

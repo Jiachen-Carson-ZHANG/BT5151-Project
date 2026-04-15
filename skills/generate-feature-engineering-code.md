@@ -38,6 +38,22 @@ Before writing code, analyze the inputs and form a hypothesis. Consider:
 - **Which features are redundant?** Look at `eda_insights.high_correlation_pairs` and the one-hot columns. Perfectly anti-correlated one-hot pairs (X_Yes/X_No) waste a dimension. Highly correlated continuous features (|r| > 0.95) add no unique information.
 - **Which standalone columns need reshaping after interactions are built?** Look at `eda_insights.highly_skewed_columns` and `train_stats.skew`. Extreme skew can compress most data into a tiny range, but skew transforms happen only after you have created any semantic ratios or products from the raw parent columns.
 - **What domain-meaningful combinations exist?** From column names and semantics, what real-world quantities can you approximate? Ratios (X per unit of Y), differences (change or gap), products (joint magnitude). Each must have a plain-language interpretation.
+
+  For **credit / lending datasets** where EMI, income, outstanding debt, or balance columns are among the top-MI features, the following ratios are canonical and almost always worth including. Create any that apply — aim for 4–8 interactions, not 1–2:
+
+  | Feature | Formula | What it captures |
+  |---|---|---|
+  | `EMI_to_Salary_Ratio` | `Total_EMI_per_month / Monthly_Inhand_Salary` | Debt burden — fraction of take-home pay consumed by loan repayments. Strong predictor of default. |
+  | `Debt_to_Income_Ratio` | `Outstanding_Debt / Annual_Income` | Leverage — total stock of debt relative to annual earning capacity. |
+  | `Savings_Rate` | `(Monthly_Inhand_Salary - Total_EMI_per_month) / Monthly_Inhand_Salary` | Cash buffer after obligations — negative values signal insolvency risk. |
+  | `Balance_to_Salary_Ratio` | `Monthly_Balance / Monthly_Inhand_Salary` | Liquidity — how many months of salary is held in reserve. |
+  | `Inquiries_per_Credit_Card` | `Num_Credit_Inquiries / (Num_Credit_Card + 1)` | Credit-seeking intensity normalized by card count — high values flag rate shopping or desperation. |
+  | `Loan_per_Account` | `Outstanding_Debt / (Num_Bank_Accounts + Num_Credit_Card + 1)` | Average debt per credit relationship — normalization by account count detects concentration risk. |
+  | `Delay_Ratio` | `Num_of_Delayed_Payment / (Num_of_Loan + 1)` | Payment discipline — delayed payments per loan, normalizing for exposure size. |
+  | `Interest_Burden` | `Outstanding_Debt * Interest_Rate / 100` | Estimated annual interest cost — products of debt stock and rate capture joint repayment stress. |
+
+  Apply the three-step ratio stabilization (inf→NaN, fill with train median, clip to p99) to every ratio you create — never skip it for this feature class.
+
 - **What is likely noise?** Constant columns, near-zero variance columns, and features with very low MI are candidates for removal. Fewer features means less overfitting risk.
 
 Your reasoning feeds directly into the `hypothesis` field of the output. Every decision in your code should trace back to this analysis.
@@ -150,7 +166,7 @@ Inside that function, prefer writing these dual-view artifacts into `workspace_p
 - `engineered_test_linear.csv`
 - `engineered_train_tree.csv`
 - `engineered_test_tree.csv`
-- `feature_engineering_report.json` — shared summary of what was added/removed/transformed and why
+- `feature_engineering_report.json` — shared summary of what was added/removed/transformed and why. **Each entry must appear exactly once** — do not append the same column to `added`/`dropped`/`transformed` once per view. The report is view-agnostic; note which views a feature belongs to inside the entry's `rationale` field if needed.
 - `view_metadata.json` — describes which artifacts belong to which view
 
 `view_metadata.json` should look like:

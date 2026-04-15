@@ -21,14 +21,24 @@ def test_explain_risk_returns_business_language(monkeypatch):
     assert "summary" in explanation
 
 
-def test_recommend_action_escalates_high_risk(monkeypatch):
+def test_explain_risk_can_embed_recommended_action(monkeypatch):
     def fake_call_json_agent(system_prompt, payload, **kwargs):
-        assert payload["risk_explanation"]["risk_level"] == "high"
+        assert payload["predicted_label"] == "Poor"
         return {
-            "action": "manual_review",
-            "reason": "Escalate due to likely poor credit standing.",
+            "predicted_label": "Poor",
+            "risk_level": "high",
+            "confidence_band": "high",
+            "summary": "Customer appears high risk because repayment indicators are poor.",
+            "recommended_action": {
+                "action": "manual_review",
+                "urgency": "within_24h",
+                "rationale": "Escalate due to likely poor credit standing.",
+            },
         }
 
     monkeypatch.setattr(business, "_call_json_agent", fake_call_json_agent)
-    action = business.recommend_action({"risk_level": "high", "confidence_band": "high"})
-    assert action["action"] == "manual_review"
+    explanation = business.explain_risk(
+        "Poor",
+        {"Poor": 0.82, "Standard": 0.15, "Good": 0.03},
+    )
+    assert explanation["recommended_action"]["action"] == "manual_review"

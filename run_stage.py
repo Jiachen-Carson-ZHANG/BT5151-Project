@@ -8,8 +8,9 @@ Usage:
     python run_stage.py preprocess        # specs + preprocessing loop + FE loop (stops after train-models)
     python run_stage.py train             # same as preprocess (train-models is the first node after FE converges)
     python run_stage.py evaluate          # train + evaluation + model selection + SHAP
-    python run_stage.py full              # entire pipeline including inference + explain + recommend
+    python run_stage.py full              # entire pipeline including inference + explanation/action
     python run_stage.py full 42           # full pipeline with row_index=42
+    python run_stage.py full 42 --save-cache   # full pipeline + save trained state for Gradio app
 """
 
 import json
@@ -40,9 +41,9 @@ STAGE_STOP_AFTER = {
 STAGES = tuple(STAGE_STOP_AFTER.keys())
 
 
-def setup_logging(stage: str):
+def setup_logging(stage: str, run_id: str):
     LOG_DIR.mkdir(exist_ok=True)
-    log_file = LOG_DIR / f"stage_{stage}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = LOG_DIR / f"stage_{stage}_{run_id}.log"
 
     fmt = "%(asctime)s %(levelname)-7s %(name)s  %(message)s"
     datefmt = "%H:%M:%S"
@@ -66,7 +67,7 @@ def setup_logging(stage: str):
     return log_file
 
 
-def run_stage(logger, stage: str, row_index: int):
+def run_stage(logger, stage: str, row_index: int, run_id: str):
     from bt5151_credit_risk.graph import build_graph
 
     stop_after = STAGE_STOP_AFTER[stage]
@@ -83,6 +84,7 @@ def run_stage(logger, stage: str, row_index: int):
 
     input_data = {
         "raw_dataset_path": dataset_path,
+        "run_id": run_id,
         "inference_input": {"row_index": row_index},
     }
 
@@ -95,13 +97,14 @@ def run_stage(logger, stage: str, row_index: int):
             result = _stream_until(compiled, input_data, stop_after, logger)
     except Exception:
         logger.exception("Pipeline failed at stage '%s'", stage)
-        return
+        return None
 
     elapsed = time.time() - t0
     logger.info("=== Stage '%s' completed in %.1fs ===", stage, elapsed)
 
     # Log outputs for all stages that ran (cumulative).
     _log_outputs(logger, stage, result)
+    return result
 
 
 def _stream_until(compiled, input_data, stop_after, logger):
@@ -279,16 +282,38 @@ def _log_evaluate(logger, result):
 
 
 def _log_full(logger, result):
-    logger.info("--- inference + explain + recommend ---")
+    logger.info("--- inference + explain ---")
     prediction = result.get("prediction_output", {})
     logger.info("  prediction: %s (confidence %.4f)",
                 prediction.get("predicted_label"), prediction.get("confidence", 0))
 
-    shap_contribs = prediction.get("shap_contributions", [])
-    if shap_contribs:
-        logger.info("  per-prediction SHAP top-5:")
-        for c in shap_contribs[:5]:
+    waterfall = (prediction.get("shap_waterfall") or {}).get("predicted_class_waterfall") or {}
+    if waterfall.get("top_features"):
+        logger.info("  per-prediction SHAP top-%d for %s:",
+                    len(waterfall["top_features"][:10]), waterfall.get("class"))
+        for c in waterfall["top_features"][:10]:
             logger.info("    %s: %s (%s)", c["feature"], c["shap_value"], c["direction"])
+
+    pdp_position = prediction.get("pdp_position") or []
+    if pdp_position:
+        logger.info("  PDP positions:")
+        for item in pdp_position[:4]:
+            logger.info("    %s: value=%s grid_pct=%s pd=%s",
+                        item.get("feature"), item.get("feature_value"),
+                        item.get("grid_position_pct"), item.get("pd_values_at_position"))
+
+    confidence_diagnosis = prediction.get("confidence_diagnosis") or {}
+    if confidence_diagnosis:
+        logger.info("  confidence diagnosis: %s — %s",
+                    confidence_diagnosis.get("caution_level"),
+                    confidence_diagnosis.get("reason"))
+
+    nearest_case = prediction.get("nearest_casebook_case") or {}
+    if nearest_case:
+        logger.info("  nearest casebook case: [%s] row=%s true=%s pred=%s sim=%s",
+                    nearest_case.get("case_type"), nearest_case.get("row_index"),
+                    nearest_case.get("true_label"), nearest_case.get("predicted_label"),
+                    nearest_case.get("cosine_similarity"))
 
     explanation = result.get("risk_explanation", {})
     logger.info("  risk_level: %s, confidence_band: %s",
@@ -298,7 +323,7 @@ def _log_full(logger, result):
         logger.info("  hypothesis_notes: %s", explanation["hypothesis_notes"])
 
     action = result.get("recommended_action", {})
-    logger.info("  action: %s — %s", action.get("action"), action.get("reason"))
+    logger.info("  action: %s — %s", action.get("action"), action.get("rationale") or action.get("reason"))
 
 
 def print_usage(logger):
@@ -320,16 +345,28 @@ def main():
         sys.exit(1)
 
     stage = sys.argv[1]
-    row_index = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+    # Parse positional row_index and optional --save-cache flag.
+    args = sys.argv[2:]
+    save_cache_flag = "--save-cache" in args
+    positional = [a for a in args if not a.startswith("--")]
+    row_index = int(positional[0]) if positional else 0
 
-    log_file = setup_logging(stage)
+    run_id = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_file = setup_logging(stage, run_id)
     logger = logging.getLogger("run_stage")
     logger.info("Stage: %s | Log file: %s", stage, log_file)
+    if save_cache_flag:
+        logger.info("--save-cache enabled: pipeline state will be serialized after run")
 
     reset_usage_log()
-    run_stage(logger, stage, row_index)
+    result = run_stage(logger, stage, row_index, run_id)
     print_usage(logger)
     logger.info("Full log saved to: %s", log_file)
+
+    if save_cache_flag and result is not None:
+        from bt5151_credit_risk.cache import save_cache
+        cache_path = save_cache(result)
+        logger.info("Pipeline cache saved → %s (launch app.py to use it)", cache_path)
 
 
 if __name__ == "__main__":

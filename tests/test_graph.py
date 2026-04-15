@@ -5,7 +5,15 @@ from sklearn.ensemble import RandomForestClassifier
 from types import SimpleNamespace
 
 import bt5151_credit_risk.graph as graph_module
-from bt5151_credit_risk.graph import build_graph, compile_graph, evaluate_models_node, run_inference_node, select_model_node
+from bt5151_credit_risk.graph import (
+    build_graph,
+    compile_graph,
+    evaluate_models_node,
+    package_analysis_bundle_node,
+    run_inference_node,
+    select_model_node,
+    training_diagnostics_node,
+)
 from bt5151_credit_risk.state import CreditRiskState
 
 
@@ -125,7 +133,6 @@ def test_graph_contains_required_nodes():
         "package-analysis-bundle",
         "run-inference",
         "explain-risk",
-        "recommend-action",
     }
     assert expected_nodes.issubset(set(graph.nodes.keys()))
     assert "execute-preprocessing" not in graph.nodes
@@ -207,13 +214,11 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
             "risk_level": "high" if predicted_label == "Poor" else "moderate",
             "confidence_band": "medium",
             "summary": "Synthetic explanation for graph test.",
-        }
-
-    def fake_recommend_action(risk_explanation, prediction_output=None):
-        call_sequence.append("recommend-action")
-        return {
-            "action": "manual_review",
-            "reason": "The predicted risk should be reviewed by a human analyst.",
+            "recommended_action": {
+                "action": "manual_review",
+                "urgency": "routine",
+                "rationale": "Synthetic rationale for graph test.",
+            },
         }
 
     def fake_review_preprocessing_quality(execution_result, dataset_policy_spec, column_transform_spec, previous_audit_report=None):
@@ -335,7 +340,15 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
         return {}
 
     def fake_compute_shap_contributions_for_case(model, model_name, input_frame, predicted_class_idx, feature_names, **kwargs):
-        return [{"feature": "Age", "shap_value": 0.1, "direction": "positive"}]
+        return {
+            "predicted_class_waterfall": {
+                "class": "Good",
+                "base_value": 0.33,
+                "top_features": [{"feature": "Age", "shap_value": 0.1, "direction": "toward"}],
+            },
+            "all_classes": {},
+            "base_values": {},
+        }
 
     def fake_select_classification_cases(test_frame, test_target, model, class_names, id_to_label):
         return [
@@ -370,7 +383,6 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     monkeypatch.setattr(graph_module, "reason_model_selection", fake_reason_model_selection)
     monkeypatch.setattr(graph_module, "build_eda_report", fake_build_eda_report)
     monkeypatch.setattr(graph_module, "explain_risk", fake_explain_risk)
-    monkeypatch.setattr(graph_module, "recommend_action", fake_recommend_action)
     monkeypatch.setattr(graph_module, "generate_eda_hypotheses", fake_generate_eda_hypotheses)
     monkeypatch.setattr(graph_module, "generate_training_diagnostics", fake_generate_training_diagnostics)
     monkeypatch.setattr(graph_module, "compute_global_shap", fake_compute_global_shap)
@@ -574,9 +586,15 @@ def test_run_inference_uses_selected_model_full_view(monkeypatch):
     monkeypatch.setattr(
         graph_module,
         "compute_shap_contributions_for_case",
-        lambda model, model_name, input_frame, predicted_code, feature_columns, top_n=5: [
-            {"feature": feature_columns[0], "shap_value": 0.4, "direction": "positive"}
-        ],
+        lambda model, model_name, input_frame, predicted_code, feature_names, top_n=10, class_names=None: {
+            "predicted_class_waterfall": {
+                "class": "Good",
+                "base_value": 0.33,
+                "top_features": [{"feature": feature_names[0], "shap_value": 0.4, "direction": "toward"}],
+            },
+            "all_classes": {},
+            "base_values": {},
+        },
     )
 
     state = SimpleNamespace(
@@ -592,10 +610,157 @@ def test_run_inference_uses_selected_model_full_view(monkeypatch):
         feature_columns=["tree_x"],
         feature_columns_by_view={"linear_view": ["lin_a", "lin_b"], "tree_view": ["tree_x"]},
         id_to_label={0: "Good", 1: "Poor", 2: "Standard"},
+        class_names=["Good", "Poor", "Standard"],
         evaluation_results={"logistic_regression": {"macro_f1": 0.7}},
         raw_frame=pd.DataFrame({"Customer_ID": ["CUS_A"]}, index=[7]),
+        global_xai_results=None,
+        training_diagnostics=None,
+        local_xai_cases=None,
     )
 
     result = run_inference_node(state)
     assert result["prediction_output"]["predicted_label"] == "Good"
-    assert result["prediction_output"]["shap_contributions"][0]["feature"] == "lin_a"
+    waterfall = result["prediction_output"]["shap_waterfall"]
+    assert waterfall["predicted_class_waterfall"]["top_features"][0]["feature"] == "lin_a"
+
+
+def test_run_inference_uses_structured_confidence_and_casebook_similarity(monkeypatch):
+    monkeypatch.setattr(
+        graph_module,
+        "compute_shap_contributions_for_case",
+        lambda model, model_name, input_frame, predicted_code, feature_names, top_n=10, class_names=None: {
+            "predicted_class_waterfall": {
+                "class": "Good",
+                "base_value": 0.33,
+                "top_features": [
+                    {"feature": "lin_a", "shap_value": 0.4, "direction": "toward"},
+                    {"feature": "lin_b", "shap_value": -0.2, "direction": "away_from"},
+                ],
+            },
+            "all_classes": {},
+            "base_values": {},
+        },
+    )
+
+    state = SimpleNamespace(
+        inference_input={"row_index": 7},
+        selected_model_name="logistic_regression",
+        trained_models={"logistic_regression": _ColumnCheckingModel(["lin_a", "lin_b"], predicted_class=0)},
+        full_feature_frame=pd.DataFrame({"tree_x": [9.0]}, index=[7]),
+        full_feature_frames_by_view={
+            "linear_view": pd.DataFrame({"lin_a": [0.5], "lin_b": [1.5]}, index=[7]),
+            "tree_view": pd.DataFrame({"tree_x": [9.0]}, index=[7]),
+        },
+        model_view_map={"logistic_regression": "linear_view"},
+        feature_columns=["tree_x"],
+        feature_columns_by_view={"linear_view": ["lin_a", "lin_b"], "tree_view": ["tree_x"]},
+        id_to_label={0: "Good", 1: "Poor", 2: "Standard"},
+        class_names=["Good", "Poor", "Standard"],
+        evaluation_results={"logistic_regression": {"macro_f1": 0.7}},
+        raw_frame=pd.DataFrame({"Customer_ID": ["CUS_A"]}, index=[7]),
+        global_xai_results=None,
+        training_diagnostics={
+            "per_class_analysis": {"Good": {"struggle_level": "low"}},
+            "confidence_analysis": {
+                "summary": "Synthetic confidence summary",
+                "by_model": {
+                    "logistic_regression": {
+                        "correct_mean_confidence": 0.81,
+                        "per_class_correct_mean_confidence": {"Good": 0.79},
+                    }
+                },
+            },
+        },
+        local_xai_cases=[
+            {
+                "row_index": 11,
+                "case_type": "representative",
+                "true_label": "Good",
+                "predicted_label": "Good",
+                "probabilities": {"Good": 0.9, "Poor": 0.05, "Standard": 0.05},
+                "shap_contributions": {
+                    "predicted_class_waterfall": {
+                        "class": "Good",
+                        "top_features": [
+                            {"feature": "lin_a", "shap_value": 0.4, "direction": "toward"},
+                            {"feature": "lin_b", "shap_value": -0.2, "direction": "away_from"},
+                        ],
+                    },
+                    "all_classes": {},
+                    "base_values": {},
+                },
+            }
+        ],
+    )
+
+    result = run_inference_node(state)
+    confidence_diagnosis = result["prediction_output"]["confidence_diagnosis"]
+    nearest_case = result["prediction_output"]["nearest_casebook_case"]
+
+    assert confidence_diagnosis["typical_correct_confidence"] == 0.79
+    assert nearest_case["row_index"] == 11
+    assert nearest_case["case_type"] == "representative"
+
+
+def test_training_diagnostics_node_wraps_machine_readable_confidence_stats(monkeypatch):
+    monkeypatch.setattr(
+        graph_module,
+        "generate_training_diagnostics",
+        lambda **kwargs: {
+            "per_class_analysis": {},
+            "capacity_analysis": {},
+            "confidence_analysis": "Narrative confidence summary",
+            "hypothesis_validation": {"tested": [], "supported": []},
+            "new_hypotheses": {"tested_predictions": [], "supported_conjectures": [], "exploratory_leads": []},
+        },
+    )
+
+    state = SimpleNamespace(
+        trained_models={"logistic_regression": _ColumnCheckingModel(["lin_a", "lin_b"], predicted_class=0)},
+        test_frame=pd.DataFrame({"tree_x": [9.0, 8.0]}),
+        test_views={"linear_view": pd.DataFrame({"lin_a": [0.5, 0.7], "lin_b": [1.5, 1.7]})},
+        model_view_map={"logistic_regression": "linear_view"},
+        test_target=pd.Series([0, 0]),
+        candidate_model_specs={},
+        evaluation_results={"logistic_regression": {"macro_f1": 0.7}},
+        learning_curves=None,
+        eda_hypotheses=None,
+        feature_engineering_hypothesis=None,
+        class_names=["Good", "Poor", "Standard"],
+    )
+
+    result = training_diagnostics_node(state)
+    confidence_analysis = result["training_diagnostics"]["confidence_analysis"]
+
+    assert confidence_analysis["summary"] == "Narrative confidence summary"
+    assert confidence_analysis["by_model"]["logistic_regression"]["correct_mean_confidence"] == 0.8
+    assert confidence_analysis["by_model"]["logistic_regression"]["per_class_correct_mean_confidence"]["Good"] == 0.8
+
+
+def test_package_analysis_bundle_uses_run_id_for_bundle_filename(tmp_path):
+    dataset_path = tmp_path / "train.csv"
+    dataset_path.write_text("x\n1\n", encoding="utf-8")
+
+    state = SimpleNamespace(
+        raw_dataset_path=str(dataset_path),
+        run_id="20260415_131136",
+        selected_model_name="xgboost",
+        class_names=["Good", "Poor", "Standard"],
+        feature_columns=["tree_x"],
+        feature_columns_by_view={"tree_view": ["tree_x"]},
+        model_view_map={"xgboost": "tree_view"},
+        eda_hypotheses={},
+        training_diagnostics={},
+        global_xai_interpretation={},
+        local_xai_interpretation={},
+        local_xai_cases=[],
+        feature_engineering_hypothesis={},
+        selection_justification="synthetic",
+        global_xai_results={"methods_used": ["shap"], "shap": {"importance": [], "dependence_data": {}}},
+    )
+
+    result = package_analysis_bundle_node(state)
+
+    expected_path = tmp_path / "lab" / "logs" / "analysis_bundle_20260415_131136.json"
+    assert expected_path.is_file()
+    assert result["analysis_bundle"]["metadata"]["run_id"] == "20260415_131136"

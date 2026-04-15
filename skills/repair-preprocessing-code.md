@@ -61,6 +61,8 @@ These are common pandas pitfalls. Use them as reference when relevant to the bug
 - **`str.extract` with multiple capture groups** returns a DataFrame, not a Series. Assign each group to its own variable, then combine.
 - **Duration strings often include connector words.** Formats like `"22 Years and 7 Months"` require a regex that tolerates `and` or similar filler tokens between units. If a parsed duration column becomes constant or all zeros after repair, assume the regex failed to match and rework the pattern before imputing.
 - **Multi-value delimited columns:** Use `str.get_dummies(sep=...)` to produce binary columns while preserving row count. After splitting, strip whitespace from column names (` str.get_dummies` doesn't strip), merge any resulting duplicates, and drop empty-name columns from trailing delimiters. Never use `explode` (changes row count) or raw `pd.get_dummies` on combined strings (cardinality explosion).
+- **If duplicate dummy columns appear after whitespace normalization, do not use `DataFrame.groupby(..., axis=1)` to merge them.** In modern pandas that pattern is brittle or removed. Use `dummies = dummies.T.groupby(level=0).max().T` after renaming/stripping the dummy columns.
+- **`Series.str.get_dummies()` does not accept `prefix=` / `prefix_sep=`.** If the failed code passed those arguments, the fix is to generate dummies first and then rename the resulting columns manually.
 - **Chained assignment trap:** In `df['col'] = pd.to_numeric(df['col']).fillna(df['col'].median())`, the `df['col']` on the right side is still the original unconverted column. Always use an intermediate: `converted = pd.to_numeric(df['col'], errors='coerce'); df['col'] = converted.fillna(converted.median())`.
 - **`series.mode()[0]` crashes on all-NaN series.** Guard with: `mode_val = s.mode(); fill = mode_val.iloc[0] if not mode_val.empty else "Unknown"`.
 - **Two-sided clipping:** Always clip both ends after numeric conversion. Use domain-reasonable bounds from the spec.
@@ -69,6 +71,80 @@ These are common pandas pitfalls. Use them as reference when relevant to the bug
 - **Do not "repair" a compact role into a wider encoding.** A broken ordinal mapping should become integer 0..K-1, not one-hot. A broken binary flag should become one scalar 0/1 column, not two dummies.
 - **Group column for splitting:** Get from `raw_df`, not `df` (it was dropped).
 - **pandas 3.x:** `freq='M'` is removed — use `freq='ME'`. Similarly `'Y'` → `'YE'`, `'Q'` → `'QE'`.
+
+## Recurring failure patterns for multi_value_set columns
+
+These errors appear repeatedly across runs. Recognise them immediately and apply the correct fix — do not reason from scratch.
+
+### Pattern A — `role violation: [missing] X (role=multi_value_set)`
+
+**Meaning**: the validator found no column starting with `X_` in the feature frame.
+**Two sub-causes:**
+
+1. **Columns created but not prefixed** (most common): the dummy columns are named `Auto Loan`, `Personal Loan`, etc. instead of `Type_of_Loan_Auto Loan`, `Type_of_Loan_Personal Loan`. The validator only recognises columns that **start with the original column name followed by `_`**. Fix the prefix line:
+   ```python
+   # WRONG — validator cannot find these:
+   dummies.columns = [f'col_{c}' for c in dummies.columns]  # 'col' is not the column name
+   dummies.columns = [c for c in dummies.columns]            # no prefix at all
+
+   # CORRECT — ORIGINAL_COL is the exact column name, e.g. 'Type_of_Loan':
+   ORIGINAL_COL = 'Type_of_Loan'
+   dummies.columns = [f'{ORIGINAL_COL}_{c}' for c in dummies.columns]
+   ```
+
+2. **Encoding block missing entirely**: the column was never multi-hot encoded. Add the full encoding block before the `df.drop(columns=[ORIGINAL_COL])` call.
+
+### Pattern B — `no_mangled_duplicate_columns` (`.1` suffix columns)
+
+**Meaning**: feature frame contains `Auto Loan.1`, `Credit-Builder Loan.1`, etc. — pandas auto-mangled duplicate column names.
+**Cause**: whitespace normalization created identical column names (e.g. `" Auto Loan"` and `"Auto Loan"` both strip to `"Auto Loan"`), but the deduplication step is missing.
+**Fix**: add the deduplication step after stripping whitespace, and BEFORE prefixing:
+```python
+dummies.columns = [c.strip() for c in dummies.columns]      # strip first
+dummies = dummies.T.groupby(level=0).max().T                 # deduplicate BEFORE prefixing
+dummies = dummies.loc[:, dummies.columns.str.strip() != '']  # drop empty-name columns
+dummies.columns = [f'{ORIGINAL_COL}_{c}' for c in dummies.columns]  # prefix last
+```
+
+### Pattern C — `TypeError: DataFrame.groupby() got an unexpected keyword argument 'axis'`
+
+**Cause**: deprecated `groupby(axis=1)` pattern used to merge duplicate columns.
+**Fix**: never use `groupby(axis=1)`. The correct deduplication is the transpose pattern: `dummies = dummies.T.groupby(level=0).max().T`.
+
+### Pattern D — `TypeError: StringMethods.get_dummies() got an unexpected keyword argument 'prefix'`
+
+**Cause**: `str.get_dummies()` in pandas 2.x does not accept `prefix=` or `prefix_sep=`.
+**Fix**: generate dummies without prefix arguments, then rename manually:
+```python
+dummies = cleaned.str.get_dummies(sep=',')                              # no prefix/prefix_sep args
+dummies.columns = [f'{ORIGINAL_COL}_{c.strip()}' for c in dummies.columns]  # rename afterwards
+```
+
+### Pattern E — `groupby().transform()` crashes on group_impute_by
+
+**Cause**: the grouper list construction uses a pattern incompatible with the current pandas version (e.g. inline `hasattr` checks, chained group operations).
+**Fix**: use the canonical pattern from the generate skill verbatim:
+```python
+groupers = []
+for gc in group_by_cols:
+    if gc in df.columns:
+        groupers.append(df[gc])
+    elif gc in raw_df.columns:
+        groupers.append(raw_df[gc].reset_index(drop=True).reindex(df.index))
+df['col'] = df['col'].fillna(df.groupby(groupers)['col'].transform('median'))
+df['col'] = df['col'].fillna(df['col'].median())  # global fallback for all-NaN groups
+```
+
+### If the same role_violation appears for the third time
+
+Stop and re-read the **entire** multi-hot block from scratch. Check every line in order:
+1. Is `ORIGINAL_COL` set to the exact column name from the spec?
+2. Is the deduplication (`dummies.T.groupby(level=0).max().T`) happening **before** the prefix line?
+3. Does the prefix line use `f'{ORIGINAL_COL}_{c}'` (not `f'col_{c}'`)?
+4. Is `df.drop(columns=[ORIGINAL_COL])` inside the `pd.concat` call to remove the original column?
+5. Is `pd.concat` called with `axis=1` (not axis=0)?
+
+All five must be true simultaneously. Passing any four of the five still fails.
 
 ## Notes
 

@@ -107,19 +107,25 @@ For every column with `action: "keep"`, apply in this order:
 ### Step 6: Encode categorical columns
 For each column that needs encoding per the spec:
 - **Skip columns with `representation_intent: "deferred"`.** These stay as cleaned string (object-dtype) columns in `feature_frame.csv`; the downstream feature engineering stage will encode them per view (one-hot for linear, frequency/target for tree). Do NOT one-hot or label-encode them here — that defeats the deferred contract. The feature engineering validator will enforce that both views end numeric.
-- **Multi-value delimited columns** (spec says "split on delimiter"): **NEVER use `explode`** — it changes the row count, breaking downstream group-based splits. Instead:
+- **Multi-value delimited columns** (spec says "split on delimiter"): **NEVER use `explode`** — it changes the row count, breaking downstream group-based splits. Instead, follow this exact pattern — **substitute the actual column name from the spec** (e.g. `Type_of_Loan`) wherever `ORIGINAL_COL` appears:
   ```python
-  # Clean delimiter artifacts, split, and STRIP whitespace from each token
-  cleaned = df['col'].fillna('').str.replace(r'\band\b', ',', regex=True)
+  # Set to the EXACT column name from the spec — e.g. 'Type_of_Loan'
+  ORIGINAL_COL = 'Type_of_Loan'
+  cleaned = df[ORIGINAL_COL].fillna('').str.replace(r'\band\b', ',', regex=True)
   dummies = cleaned.str.get_dummies(sep=',')
   # CRITICAL: str.get_dummies does NOT strip whitespace — " Type A" and "Type A" become separate columns
   dummies.columns = [c.strip() for c in dummies.columns]
   dummies = dummies.T.groupby(level=0).max().T  # merge any columns that become identical after strip
   dummies = dummies.loc[:, dummies.columns.str.strip() != '']  # drop empty-name columns from trailing commas
-  dummies.columns = [f'col_{c}' for c in dummies.columns]
-  df = pd.concat([df.drop(columns=['col']), dummies], axis=1)
+  # REQUIRED: prefix every dummy with the original column name so the validator can find them.
+  # The validator looks for columns starting with f'{ORIGINAL_COL}_'.
+  # If you name them 'Auto Loan' instead of 'Type_of_Loan_Auto Loan', the validator reports
+  # "role violation: [missing]" even when the encoding ran successfully.
+  dummies.columns = [f'{ORIGINAL_COL}_{c}' for c in dummies.columns]
+  df = pd.concat([df.drop(columns=[ORIGINAL_COL]), dummies], axis=1)
   ```
   Do NOT pass raw combined strings to `pd.get_dummies` — that creates one dummy per unique combination (thousands of columns).
+  Do NOT use `f'col_{c}'` — `col` is not a valid substitution; always use the actual column name string.
 - **One-hot**: `df = pd.get_dummies(df, columns=[...], drop_first=False)`
 - **Keep compact encodings compact.** If the spec says `binary_flag`, preserve one scalar 0/1 column. If the spec says `ordered_categorical` with `encoding: "ordinal"`, map directly to integers 0..K-1 and leave it as one column. Do not convert either of these to one-hot.
 - **High-cardinality unordered categories**: if the spec chose a compact representation such as `label`, `frequency`, or another scalar proxy, keep it scalar here. Do not replace it with one-hot just because pandas makes that easy.
@@ -132,6 +138,8 @@ For each column that needs encoding per the spec:
 
 ### Step 8: Save target.csv
 - `target.to_frame().to_csv(workspace_path / 'target.csv', index=False)`
+- **CRITICAL: save the raw string values as-is.** Do NOT map, encode, or convert the target to integers before saving. The pipeline re-encodes the target after validation — if you encode it here (e.g. `Good→0, Standard→1, Poor→2`), the class names will be reconstructed as `['0','1','2']` instead of `['Good','Standard','Poor']`, corrupting confusion matrices, SHAP attribution, and every downstream explanation step.
+- If you wrote any label-encoding step for the target column earlier in the function, remove it. The target is extracted in Step 3, used only for `target.csv`, and must remain as its original string dtype.
 
 ### Step 9: Split train/test
 - Use the split_strategy from dataset_policy_spec.
@@ -189,6 +197,8 @@ For columns `["ID", "Age", "Smoker", "Diagnosis"]` where ID and Diagnosis are dr
 - **Defensive numeric conversion.** Always use `pd.to_numeric(col, errors='coerce')` — never `.replace().astype()`. Real-world CSVs have unpredictable string artifacts (underscores, commas, trailing spaces) that `.astype()` cannot handle.
 - **Never reference the original column inside a chained assignment.** In `df['col'] = pd.to_numeric(df['col'], errors='coerce').fillna(df['col'].median())`, the `df['col']` on the right side is still the unconverted (e.g. string) column — calling `.median()`, `.mean()`, `.clip()`, or any aggregation on it will fail or produce wrong results. Always assign to an intermediate variable first: `converted = pd.to_numeric(df['col'], errors='coerce'); df['col'] = converted.fillna(converted.median())`.
 - **Multi-value delimited columns.** Use `str.get_dummies(sep=...)` — NEVER `explode` (changes row count), NEVER raw `pd.get_dummies` (cardinality explosion). **Always strip whitespace from the resulting column names** and drop empty-name columns — `str.get_dummies` does not strip, so `" Type A"` and `"Type A"` become separate duplicate columns.
+- **Do not use `DataFrame.groupby(..., axis=1)` to merge duplicate dummy columns.** That pattern is brittle in modern pandas and has already caused runtime failures in this pipeline. After stripping dummy column labels, merge duplicates with the transpose pattern shown earlier: `dummies = dummies.T.groupby(level=0).max().T`.
+- **Series.str.get_dummies() does not support `prefix=` or `prefix_sep=`.** Generate the dummies first, then rename the columns yourself. If you want `Type_of_Loan_Auto_Loan`, build it with `dummies.columns = [f'Type_of_Loan_{c}' for c in dummies.columns]` after `str.get_dummies`.
 - **Two-sided outlier clipping.** Always clip both ends. Use domain-reasonable bounds or percentile-based bounds (1st/99th). `clip(lower=0)` alone lets implausible high values through.
 - **`str.extract` with multiple capture groups returns a DataFrame.** Assign each group to a separate intermediate column, then combine. Example for "X Years and Y Months" → total months:
   ```python
@@ -203,3 +213,12 @@ For columns `["ID", "Age", "Smoker", "Diagnosis"]` where ID and Diagnosis are dr
 - **pandas 3.x offset aliases changed.** `freq='M'` is removed — use `freq='ME'` for month-end. Similarly `'Y'` → `'YE'`, `'Q'` → `'QE'`. If you need a month mapping, just use a dict literal instead of `pd.date_range`.
 - **`series.mode()[0]` crashes on all-NaN series.** `mode()` returns an empty Series when all values are NaN, so `[0]` raises KeyError. Guard with: `mode_val = s.mode(); fill = mode_val.iloc[0] if not mode_val.empty else "Unknown"`.
 - **`df[col].replace(df[col] < 0, np.nan)` is wrong.** `df[col] < 0` returns a boolean Series, which `.replace()` interprets as a dict-like. Use `df[col] = df[col].where(df[col] >= 0, np.nan)` or `df.loc[df[col] < 0, col] = np.nan` instead.
+- **Multi-hot self-check.** After encoding any `multi_value_set` column, assert that the derived columns carry the original column name as prefix. If the assertion fires, the prefix line is wrong:
+  ```python
+  assert all(c.startswith(f'{ORIGINAL_COL}_') for c in dummies.columns), (
+      f"BUG: multi-hot columns are missing the '{ORIGINAL_COL}_' prefix. "
+      f"Current names: {list(dummies.columns[:3])}. "
+      f"Fix: dummies.columns = [f'{ORIGINAL_COL}_{{c}}' for c in dummies.columns]"
+  )
+  ```
+- **Domain-aware imputation fallbacks.** When a numeric column can be mechanically derived from another (e.g. a monthly figure from an annual one), use the derivation as a secondary fill BEFORE falling back to the global median. The spec may declare this as `fallback_formula`; if so, evaluate it after the referenced column is itself cleaned. Canonical example: when `Monthly_Inhand_Salary` (15% missing) has a `fallback_formula` of `Annual_Income / 12`, apply it after Annual_Income is converted and imputed: `df['Monthly_Inhand_Salary'] = df['Monthly_Inhand_Salary'].fillna(df['Annual_Income'] / 12).fillna(df['Monthly_Inhand_Salary'].median())`. Similarly, `Monthly_Balance = Monthly_Inhand_Salary - Total_EMI_per_month` when both are clean. Never skip a `fallback_formula` — it preserves customer-level signal that global median destroys.

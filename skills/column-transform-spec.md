@@ -31,7 +31,16 @@ Given the dataset-level policy, sample data, column profiles, and optional EDA i
    - **Hard clip** (`clip_to_bounds`): squash values to `[low, high]`. Default when no group structure exists.
    - **Mark-and-refill** (`mark_out_of_range_nan`): set out-of-range values to NaN, then let the `imputation` strategy (group_median / fallback_formula / median) fill them. Preferred when group structure exists — a customer's own peer records restore signal that hard-clipping would flatten. Declare which strategy in `cleaning` (e.g. `"mark values < 0 or > 50000 as NaN"` vs `"clip to [0, 50000]"`).
 
-10. **Derived fallbacks are valid imputation.** When a missing field is mechanically related to another (canonical examples: a monthly value that equals an annual / 12, a balance that equals income minus outflows), declare a `fallback_formula` so the generator computes the relation before falling back to a statistical fill. Formulas are pandas-evaluable expressions over other columns.
+10. **Derived fallbacks are valid imputation.** When a missing field is mechanically related to another column, declare a `fallback_formula` so the generator computes the derived value before falling back to a statistical fill. Formulas are pandas-evaluable expressions over other columns. **This is not optional when a mechanical relationship exists** — global median imputation on a column with 15% missingness gives 15% of rows the same constant, corrupting every downstream ratio feature that uses the imputed column (a column ranked #1 in mutual information can drop out of SHAP top-10 entirely this way).
+
+    **Why this matters:** global median imputation on a column with 15% missingness gives 15% of rows the *same constant value*. Any ratio feature that uses the imputed column (e.g. EMI-to-Salary) will be corrupted for exactly those rows — the column that ranked #1 in mutual information can drop out of the SHAP top-10 entirely if its denominator is contaminated this way. A `fallback_formula` that uses an available peer column restores real variation instead of injecting a constant artifact.
+
+    Named canonical patterns for financial / credit datasets:
+    - **Monthly from annual:** `Annual_Income / 12` — when a `*_monthly` or `*_per_month` income field is missing and an annual equivalent exists, this is almost always the right formula, not the median.
+    - **Balance from income and outflows:** `Monthly_Inhand_Salary - Total_EMI_per_month` — when a balance field is missing but both salary and EMI components are available.
+    - **Derived payment from principal and rate:** `Outstanding_Debt * Interest_Rate / 1200` — when a monthly payment amount is missing but debt and rate are present.
+
+    Decision rule: any time you see a `*_monthly` / `*_per_month` column with missingness > 5% **and** a corresponding annual or total column, ask "is there a mechanical formula?" If yes, use `imputation: "fallback_formula"` and set `fallback_formula` to that expression. Keep `imputation: "median"` only as the last-resort global backstop (i.e., still declare `fallback_formula` but the codegen will fall through to median when the formula's inputs are also NaN).
 
 11. **Bucket-conditional imputation.** When a field's missing values correlate with a ranged/categorical peer (e.g. "delay severity" bucketed from another column), the spec can declare `group_impute_by` as a derived bucket via `bucket_spec` (bin edges + source column). This generalizes beyond raw group IDs to any conditioning structure.
 

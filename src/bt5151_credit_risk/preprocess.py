@@ -1,5 +1,6 @@
 import ast
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -705,6 +706,52 @@ def validate_preprocessing_output(
         f"Target file was not found at {target_path}.",
     )
 
+    # Deterministic check: target.csv must contain raw string labels, not integer codes.
+    # If the preprocessing code encoded the target (e.g. Good→0, Standard→1, Poor→2),
+    # the graph will reconstruct class_names as ['0','1','2'] instead of the real labels,
+    # breaking every downstream step that references class names (confusion matrix, SHAP,
+    # local casebook, explain-risk).  We detect this by comparing target.csv values
+    # against the original raw target column in raw_frame.csv.
+    if target_path.is_file() and raw_frame_path.is_file() and target_column:
+        try:
+            target_df = pd.read_csv(target_path)
+            target_series_raw = target_df.iloc[:, 0]
+            raw_frame_check = pd.read_csv(raw_frame_path, usecols=[target_column])
+            original_unique = set(raw_frame_check[target_column].dropna().astype(str).unique())
+            saved_unique = set(target_series_raw.dropna().astype(str).unique())
+            # If the saved values are all numeric integers and the original values are
+            # not (e.g. 'Good','Standard','Poor' → 0,1,2), the target was encoded.
+            original_looks_numeric = all(
+                v.lstrip("-").replace(".", "", 1).isdigit() for v in original_unique
+            )
+            saved_looks_integer = all(
+                v.lstrip("-").isdigit() for v in saved_unique
+            )
+            is_encoded = not original_looks_numeric and saved_looks_integer
+            # Secondary check: if saved values are contiguous integers 0..K-1 while
+            # original values differ completely, it is definitely encoded.
+            if not is_encoded and saved_looks_integer:
+                try:
+                    int_vals = sorted(int(v) for v in saved_unique)
+                    is_encoded = int_vals == list(range(len(int_vals))) and not saved_unique.issubset(original_unique)
+                except ValueError:
+                    pass
+            add_check(
+                "target_labels_not_encoded",
+                not is_encoded,
+                (
+                    f"target.csv contains integer codes {sorted(saved_unique)} instead of raw "
+                    f"category labels {sorted(original_unique)}. The preprocessing function must "
+                    "save the original target values (e.g. 'Good', 'Standard', 'Poor') directly — "
+                    "do NOT label-encode or map the target to integers before saving. "
+                    "The graph re-encodes the target after validation; encoding it twice produces "
+                    "class_names=['0','1','2'] which breaks confusion matrices, SHAP, and explain-risk."
+                ),
+            )
+        except Exception as _exc:
+            # Non-fatal: if we can't read either file the target_file_exists check already flagged it.
+            checks.setdefault("target_labels_not_encoded", True)
+
     feature_frame = None
     if feature_frame_path.is_file():
         try:
@@ -719,6 +766,20 @@ def validate_preprocessing_output(
             checks["feature_frame_readable"] = False
         else:
             checks["feature_frame_readable"] = True
+            mangled_duplicate_like = [
+                col for col in feature_frame.columns
+                if re.search(r"\.\d+$", str(col))
+            ]
+            add_check(
+                "no_mangled_duplicate_columns",
+                not mangled_duplicate_like,
+                (
+                    "Feature frame contains duplicate-like columns created by pandas "
+                    f"name mangling: {mangled_duplicate_like[:10]}. "
+                    "This usually means a one-hot/multi-hot encoder produced the same "
+                    "logical category twice (often after whitespace normalization)."
+                ),
+            )
             add_check(
                 "target_excluded",
                 target_column not in feature_frame.columns,

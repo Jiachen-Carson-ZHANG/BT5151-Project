@@ -32,6 +32,7 @@ def test_dataset_profile_without_target_column(sample_frame):
 def test_state_has_expected_keys():
     state = CreditRiskState(raw_dataset_path="train.csv")
     assert state.raw_dataset_path == "train.csv"
+    assert state.run_id is None
     assert state.dataset_policy_spec is None
     assert state.column_transform_spec is None
     assert state.preprocessing_code is None
@@ -76,6 +77,7 @@ def test_state_has_expected_keys():
 def test_state_accepts_new_preprocessing_fields():
     state = CreditRiskState(
         raw_dataset_path="train.csv",
+        run_id="20260415_131136",
         preprocessing_code={"code": "print('hello')"},
         preprocessing_codegen_metadata={"model": "gpt-4o-mini"},
         preprocessing_code_review={"passed": True},
@@ -88,3 +90,4 @@ def test_state_accepts_new_preprocessing_fields():
 
     assert state.preprocessing_code == {"code": "print('hello')"}
     assert state.preprocessing_attempt_count == 2
+    assert state.run_id == "20260415_131136"

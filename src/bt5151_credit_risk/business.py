@@ -13,7 +13,10 @@ def explain_risk(
     selected_model_name=None,
     evaluation_metrics=None,
     source_record=None,
-    shap_contributions=None,
+    shap_waterfall=None,
+    pdp_position=None,
+    confidence_diagnosis=None,
+    nearest_casebook_case=None,
     global_shap_importance=None,
     analysis_bundle_summary=None,
     selection_justification=None,
@@ -25,26 +28,17 @@ def explain_risk(
         "selected_model_name": selected_model_name,
         "evaluation_metrics": evaluation_metrics,
         "source_record": source_record,
-        "shap_contributions": shap_contributions,
         "global_shap_importance": global_shap_importance,
         "selection_justification": selection_justification,
     }
+    if shap_waterfall:
+        payload["shap_waterfall"] = shap_waterfall
+    if pdp_position:
+        payload["pdp_position"] = pdp_position
+    if confidence_diagnosis:
+        payload["confidence_diagnosis"] = confidence_diagnosis
+    if nearest_casebook_case:
+        payload["nearest_casebook_case"] = nearest_casebook_case
     if analysis_bundle_summary:
         payload["analysis_bundle_summary"] = analysis_bundle_summary
     return _call_json_agent(system_prompt, payload, caller="explain-risk")
-
-
-# Turn the explanation into a suggested next action.
-def recommend_action(risk_explanation, prediction_output=None):
-    system_prompt = (
-        "You are a business operations specialist interpreting a classification model's output. "
-        "Return only valid JSON with keys: action, reason. "
-        "Choose a concise action code that reflects the appropriate business response to the predicted class "
-        "(e.g., escalate, review, monitor, standard_handling). "
-        "Write the reason for a non-technical business user."
-    )
-    payload = {
-        "risk_explanation": risk_explanation,
-        "prediction_output": prediction_output,
-    }
-    return _call_json_agent(system_prompt, payload, caller="recommend-action")

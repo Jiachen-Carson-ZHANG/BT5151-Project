@@ -490,7 +490,7 @@ def tune_models(
                 len(es_idx),
             )
             es_model = clone(final_model)
-            es_model.set_params(n_estimators=1000, early_stopping_rounds=50)
+            es_model.set_params(n_estimators=1500, early_stopping_rounds=75)
             es_fit_kwargs = {
                 "eval_set": [(X_tr, y_tr), (X_es, y_es)],
                 "verbose": False,

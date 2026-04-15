@@ -7,6 +7,7 @@ class CreditRiskState(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     raw_dataset_path: str
+    run_id: str | None = None
     dataset_profile: dict | None = None
     eda_report: dict | None = None
     eda_hypotheses: dict | None = None

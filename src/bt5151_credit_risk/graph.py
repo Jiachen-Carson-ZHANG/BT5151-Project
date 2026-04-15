@@ -2,12 +2,13 @@ import json
 import logging
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from langgraph.graph import END, START, StateGraph
 
 logger = logging.getLogger(__name__)
 
-from bt5151_credit_risk.business import explain_risk, recommend_action
+from bt5151_credit_risk.business import explain_risk
 from bt5151_credit_risk.eda import build_eda_report
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics, reason_model_selection
 from bt5151_credit_risk.hypotheses import (
@@ -22,6 +23,7 @@ from bt5151_credit_risk.xai import (
     compute_partial_dependence,
     compute_ale,
     compute_shap_contributions_for_case,
+    annotate_pdp_position,
     select_classification_cases,
 )
 from bt5151_credit_risk.feature_engineering import (
@@ -427,6 +429,20 @@ def review_preprocessing_quality_node(state: CreditRiskState):
     )
     verdict = audit_report.get("verdict", "pass")
     issues = audit_report.get("issues", [])
+    # Deterministic override: if the LLM said "pass" but left critical/major issues in the
+    # report, force needs_repair.  This prevents the reviewer from being too lenient and
+    # allows major issues to slip through as "pass" with logged warnings.
+    if verdict != "needs_repair":
+        actionable = [i for i in issues if i.get("severity") in ("critical", "major")]
+        if actionable:
+            logger.warning(
+                "    audit verdict overridden to needs_repair — %d major/critical issue(s) present despite '%s' verdict",
+                len(actionable), verdict,
+            )
+            verdict = "needs_repair"
+            audit_report = dict(audit_report)
+            audit_report["verdict"] = "needs_repair"
+            audit_report.setdefault("override_reason", f"Deterministic override: {len(actionable)} major/critical issue(s) present.")
     logger.info("    verdict: %s, issues: %d", verdict, len(issues))
     for issue in issues:
         level = logging.WARNING if issue.get("severity") in ("critical", "major") else logging.INFO
@@ -611,9 +627,18 @@ def validate_feature_engineering_node(state: CreditRiskState):
             fe_report = json.loads(Path(report_path).read_text(encoding="utf-8"))
             for key in ("dropped", "transformed", "added"):
                 items = fe_report.get(key, [])
-                if items:
-                    logger.info("    FE %s (%d):", key, len(items))
-                    for item in items[:10]:
+                # Deduplicate by column name — dual-view code sometimes appends the same
+                # entry twice (once per view) into the shared report list.
+                seen: set[str] = set()
+                unique_items = []
+                for item in items:
+                    col_key = item.get("column") if isinstance(item, dict) else str(item)
+                    if col_key not in seen:
+                        seen.add(col_key)
+                        unique_items.append(item)
+                if unique_items:
+                    logger.info("    FE %s (%d):", key, len(unique_items))
+                    for item in unique_items[:10]:
                         logger.info("      %s", json.dumps(item, default=str)[:150])
         except Exception:
             pass
@@ -782,7 +807,6 @@ def evaluate_models_node(state: CreditRiskState):
 # LLM-driven training diagnostics: per-class analysis, capacity, hypothesis validation.
 def training_diagnostics_node(state: CreditRiskState):
     logger.info(">>> training-diagnostics")
-    import numpy as np
 
     # Build tuning_results from candidate_model_specs
     tuning_results = {}
@@ -799,18 +823,34 @@ def training_diagnostics_node(state: CreditRiskState):
             probas = model.predict_proba(test_view)
             preds = model.predict(test_view)
             correct = preds == state.test_target.values
+            model_conf = {}
             if correct.any():
                 correct_max_proba = probas[correct].max(axis=1)
-                confidence_stats[model_name] = {
+                model_conf.update({
                     "correct_mean_confidence": round(float(correct_max_proba.mean()), 4),
                     "correct_std_confidence": round(float(correct_max_proba.std()), 4),
-                }
+                })
             if (~correct).any():
                 wrong_max_proba = probas[~correct].max(axis=1)
-                confidence_stats[model_name].update({
+                model_conf.update({
                     "wrong_mean_confidence": round(float(wrong_max_proba.mean()), 4),
                     "wrong_std_confidence": round(float(wrong_max_proba.std()), 4),
                 })
+            per_class_correct = {}
+            per_class_wrong = {}
+            for cidx, cname in enumerate(state.class_names or []):
+                pred_mask = preds == cidx
+                correct_mask = correct & pred_mask
+                wrong_mask = (~correct) & pred_mask
+                if correct_mask.any():
+                    per_class_correct[cname] = round(float(probas[correct_mask].max(axis=1).mean()), 4)
+                if wrong_mask.any():
+                    per_class_wrong[cname] = round(float(probas[wrong_mask].max(axis=1).mean()), 4)
+            if per_class_correct:
+                model_conf["per_class_correct_mean_confidence"] = per_class_correct
+            if per_class_wrong:
+                model_conf["per_class_wrong_mean_confidence"] = per_class_wrong
+            confidence_stats[model_name] = model_conf
         except Exception:
             pass
 
@@ -827,6 +867,18 @@ def training_diagnostics_node(state: CreditRiskState):
     except Exception as exc:
         logger.warning("    training diagnostics failed (%s), continuing without", exc)
         return {"training_diagnostics": None}
+
+    raw_confidence_analysis = diagnostics.get("confidence_analysis")
+    if isinstance(raw_confidence_analysis, dict):
+        confidence_analysis = dict(raw_confidence_analysis)
+        confidence_analysis.setdefault("summary", "")
+        confidence_analysis["by_model"] = confidence_stats
+    else:
+        confidence_analysis = {
+            "summary": raw_confidence_analysis or "",
+            "by_model": confidence_stats,
+        }
+    diagnostics["confidence_analysis"] = confidence_analysis
 
     per_class = diagnostics.get("per_class_analysis", {})
     for cls_name, analysis in per_class.items():
@@ -966,65 +1018,38 @@ def global_xai_node(state: CreditRiskState):
     except Exception as exc:
         logger.warning("    PFI computation failed: %s", exc)
 
-    # Method gating: identify top continuous features and correlation structure from EDA
-    eda_high_corr_cols = set()
-    if state.eda_report:
-        for pair in state.eda_report.get("correlations", {}).get("high_pairs", []):
-            eda_high_corr_cols.add(pair["col_a"])
-            eda_high_corr_cols.add(pair["col_b"])
-
-    def _is_correlated(feat_name: str) -> bool:
-        """Check if a feature (possibly engineered) relates to any high-correlation raw column.
-
-        Uses word-boundary matching: splits both names into tokens on underscores
-        and checks for token-set overlap. This catches derived features like
-        'Annual_Income_Debt_Ratio' (tokens: {annual, income, debt, ratio})
-        matching 'Annual_Income' (tokens: {annual, income}) without false-
-        positives like 'Age' matching 'Average_Pages' (no shared tokens).
-        """
-        if feat_name in eda_high_corr_cols:
-            return True
-        feat_tokens = set(feat_name.lower().split("_"))
-        for raw_col in eda_high_corr_cols:
-            raw_tokens = set(raw_col.lower().split("_"))
-            if raw_tokens.issubset(feat_tokens):
-                return True
-        return False
-
-    # Identify top continuous features from SHAP importance
+    # Identify top continuous-ish features from SHAP importance.
+    # We keep the set small for runtime, but compute both PDP and ALE where feasible
+    # because they are complementary: PDP gives a direct average effect view, while
+    # ALE is more reliable when local feature correlations distort PDP.
     top_shap_features = [e["feature"] for e in (state.global_shap_importance or [])[:10]]
     numeric_cols = set(test_view.select_dtypes(include="number").columns)
     top_continuous = [f for f in top_shap_features if f in numeric_cols][:5]
 
     if top_continuous:
-        correlated = [f for f in top_continuous if _is_correlated(f)]
-        uncorrelated = [f for f in top_continuous if not _is_correlated(f)]
-
-        # Conditional: ALE where correlation exists
-        if correlated:
-            try:
-                ale = compute_ale(
-                    model, model_name, test_view,
-                    feature_columns, correlated, state.class_names,
-                )
-                results["ale"] = ale
-                results["methods_used"].append("ale")
-                logger.info("    ALE computed for %d correlated features: %s", len(ale), list(ale.keys()))
-            except Exception as exc:
-                logger.warning("    ALE computation failed: %s", exc)
-
-        # Conditional: PDP where features are uncorrelated
-        if uncorrelated:
-            try:
-                pdp = compute_partial_dependence(
-                    model, model_name, test_view,
-                    feature_columns, uncorrelated, state.class_names,
-                )
+        try:
+            pdp = compute_partial_dependence(
+                model, model_name, test_view,
+                feature_columns, top_continuous, state.class_names,
+            )
+            if pdp:
                 results["pdp"] = pdp
                 results["methods_used"].append("pdp")
-                logger.info("    PDP computed for %d uncorrelated features: %s", len(pdp), list(pdp.keys()))
-            except Exception as exc:
-                logger.warning("    PDP computation failed: %s", exc)
+                logger.info("    PDP computed for %d features: %s", len(pdp), list(pdp.keys()))
+        except Exception as exc:
+            logger.warning("    PDP computation failed: %s", exc)
+
+        try:
+            ale = compute_ale(
+                model, model_name, test_view,
+                feature_columns, top_continuous, state.class_names,
+            )
+            if ale:
+                results["ale"] = ale
+                results["methods_used"].append("ale")
+                logger.info("    ALE computed for %d features: %s", len(ale), list(ale.keys()))
+        except Exception as exc:
+            logger.warning("    ALE computation failed: %s", exc)
 
     logger.info("    methods used: %s", results["methods_used"])
     return {"global_xai_results": results}
@@ -1141,6 +1166,7 @@ def package_analysis_bundle_node(state: CreditRiskState):
     bundle = {
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": state.run_id,
             "selected_model": state.selected_model_name,
             "selected_model_view": _get_model_view_name(state, state.selected_model_name),
             "class_names": state.class_names,
@@ -1168,9 +1194,10 @@ def package_analysis_bundle_node(state: CreditRiskState):
         numeric_artifacts["ale"] = state.global_xai_results.get("ale")
         numeric_artifacts["methods_used"] = state.global_xai_results.get("methods_used", [])
 
-    # Save both to disk. Use local YYYYMMDD_HHMMSS to align with log file naming convention.
+    # Save both to disk using the stage run_id when available so log and bundle share
+    # one stable artifact identity.
     run_root = Path(state.raw_dataset_path).resolve().parent
-    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp_str = state.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
     full_on_disk = dict(bundle)
     full_on_disk["numeric_artifacts"] = numeric_artifacts
     # Save alongside run logs in lab/logs/ so all run artifacts are co-located.
@@ -1202,41 +1229,179 @@ def run_inference_node(state: CreditRiskState):
     model = state.trained_models[model_name]
     probabilities = model.predict_proba(input_frame)[0]
     predicted_code = int(model.predict(input_frame)[0])
+    predicted_label = state.id_to_label[predicted_code]
     probability_map = {
         state.id_to_label[idx]: float(score)
         for idx, score in enumerate(probabilities)
     }
-    logger.info("    row %d → predicted: %s, confidence: %.4f",
-                row_index, state.id_to_label[predicted_code], max(float(s) for s in probabilities))
+    confidence = max(probability_map.values())
+    logger.info("    row %d → predicted: %s, confidence: %.4f", row_index, predicted_label, confidence)
 
-    # Compute SHAP contributions for this prediction.
-    shap_contributions = []
+    # Full SHAP waterfall — top-10, all classes, base values.
+    shap_result = {}
     try:
-        shap_contributions = compute_shap_contributions_for_case(
-            model, model_name, input_frame,
-            predicted_code, feature_columns, top_n=5,
+        shap_result = compute_shap_contributions_for_case(
+            model, model_name, input_frame, predicted_code,
+            feature_columns, top_n=10, class_names=state.class_names,
         )
-        for c in shap_contributions:
-            logger.info("    SHAP: %s = %.4f (%s)", c["feature"], c["shap_value"], c["direction"])
+        waterfall = shap_result.get("predicted_class_waterfall", {})
+        for feat in (waterfall.get("top_features") or [])[:5]:
+            logger.info("    SHAP [%s] %s = %.4f (%s)",
+                        waterfall.get("class"), feat["feature"], feat["shap_value"], feat["direction"])
     except Exception as exc:
-        logger.warning("    SHAP computation failed: %s", exc)
+        logger.warning("    SHAP waterfall failed: %s", exc)
+
+    # PDP position — for top-4 SHAP features, locate this row on the PDP curve.
+    pdp_annotations = []
+    try:
+        pdp_results = (state.global_xai_results or {}).get("pdp") or {}
+        if pdp_results and shap_result.get("predicted_class_waterfall"):
+            top_shap_features = [
+                f["feature"]
+                for f in shap_result["predicted_class_waterfall"].get("top_features", [])
+            ]
+            row_values = {
+                feat: float(input_frame[feat].iloc[0])
+                for feat in top_shap_features
+                if feat in input_frame.columns
+            }
+            pdp_annotations = annotate_pdp_position(row_values, pdp_results, top_n=4)
+            for ann in pdp_annotations:
+                logger.info("    PDP [%s] val=%.3f → grid_pct=%.0f%%, pd=%s",
+                            ann["feature"], ann["feature_value"],
+                            ann["grid_position_pct"], ann["pd_values_at_position"])
+    except Exception as exc:
+        logger.warning("    PDP annotation failed: %s", exc)
+
+    # Confidence diagnosis — compare this prediction's confidence against per-class
+    # calibration from training diagnostics to flag whether caution is warranted.
+    confidence_diagnosis = {}
+    try:
+        diag = state.training_diagnostics or {}
+        conf_analysis = diag.get("confidence_analysis") or {}
+        per_class = diag.get("per_class_analysis") or {}
+        # Typical correct-prediction confidence for predicted class (if available)
+        typical_conf = None
+        if isinstance(conf_analysis, dict):
+            by_model = conf_analysis.get("by_model") or {}
+            model_conf = by_model.get(model_name) or by_model.get(state.selected_model_name) or {}
+            class_conf = model_conf.get("per_class_correct_mean_confidence") or {}
+            if predicted_label in class_conf:
+                try:
+                    typical_conf = float(class_conf[predicted_label])
+                except (TypeError, ValueError):
+                    typical_conf = None
+            if typical_conf is None:
+                class_conf = model_conf.get("correct_mean_confidence")
+                if class_conf is None:
+                    class_conf = conf_analysis.get(predicted_label) or conf_analysis.get("correct_mean")
+                if class_conf is not None:
+                    try:
+                        typical_conf = float(class_conf)
+                    except (TypeError, ValueError):
+                        typical_conf = None
+        # Predicted class struggle level
+        struggle = None
+        if predicted_label in per_class:
+            struggle = per_class[predicted_label].get("struggle_level") or per_class[predicted_label].get("struggle")
+        # Determine caution flag
+        if typical_conf is not None:
+            gap = typical_conf - confidence
+            if confidence < 0.45:
+                caution = "high"
+                reason = f"confidence {confidence:.2f} is very low — model is near-uniform across classes for this customer"
+            elif gap > 0.15:
+                caution = "medium"
+                reason = f"confidence {confidence:.2f} is {gap:.2f} below the typical correct-prediction confidence ({typical_conf:.2f}) for {predicted_label}"
+            else:
+                caution = "low"
+                reason = f"confidence {confidence:.2f} is in line with typical correct-prediction confidence for {predicted_label}"
+        else:
+            # Fallback: rule-of-thumb only
+            if confidence < 0.45:
+                caution = "high"
+                reason = "confidence below 0.45 — near-uniform class probabilities"
+            elif confidence < 0.65:
+                caution = "medium"
+                reason = "moderate confidence — prediction may be sensitive to small feature changes"
+            else:
+                caution = "low"
+                reason = "confidence above 0.65"
+        confidence_diagnosis = {
+            "caution_level": caution,
+            "reason": reason,
+            "confidence": round(confidence, 4),
+            "typical_correct_confidence": typical_conf,
+            "predicted_class_struggle": struggle,
+        }
+        logger.info("    confidence_diagnosis: caution=%s, %.4f — %s", caution, confidence, reason)
+    except Exception as exc:
+        logger.warning("    Confidence diagnosis failed: %s", exc)
+
+    # Nearest casebook case — find which of the 9 cases most resembles this row by SHAP cosine.
+    nearest_case = {}
+    try:
+        cases = state.local_xai_cases or []
+        if cases and shap_result.get("predicted_class_waterfall"):
+            this_features = {
+                f["feature"]: f["shap_value"]
+                for f in shap_result["predicted_class_waterfall"].get("top_features", [])
+            }
+            best_sim, best_case = -1.0, None
+            for case in cases:
+                case_shap = case.get("shap_contributions") or {}
+                if isinstance(case_shap, dict):
+                    case_top = (case_shap.get("predicted_class_waterfall") or {}).get("top_features") or []
+                else:
+                    case_top = case_shap or []
+                case_features = {f["feature"]: f["shap_value"] for f in case_top}
+                common = set(this_features) & set(case_features)
+                if not common:
+                    continue
+                a = np.array([this_features[k] for k in common])
+                b = np.array([case_features[k] for k in common])
+                denom = (np.linalg.norm(a) * np.linalg.norm(b))
+                sim = float(np.dot(a, b) / denom) if denom > 0 else 0.0
+                if sim > best_sim:
+                    best_sim, best_case = sim, case
+            if best_case:
+                nearest_case = {
+                    "case_type": best_case["case_type"],
+                    "true_label": best_case["true_label"],
+                    "predicted_label": best_case["predicted_label"],
+                    "confidence": round(max(best_case["probabilities"].values()), 4),
+                    "cosine_similarity": round(best_sim, 3),
+                    "row_index": best_case["row_index"],
+                }
+                logger.info("    nearest casebook: [%s] row=%d sim=%.3f",
+                            best_case["case_type"], best_case["row_index"], best_sim)
+    except Exception as exc:
+        logger.warning("    Nearest casebook lookup failed: %s", exc)
 
     return {
         "prediction_output": {
             "row_index": row_index,
-            "predicted_label": state.id_to_label[predicted_code],
+            "predicted_label": predicted_label,
             "probabilities": probability_map,
-            "confidence": max(probability_map.values()),
+            "confidence": round(confidence, 4),
             "selected_model_name": state.selected_model_name,
             "selected_model_view": _get_model_view_name(state, model_name),
             "evaluation_metrics": state.evaluation_results[state.selected_model_name],
             "source_record": state.raw_frame.loc[row_index].to_dict(),
-            "shap_contributions": shap_contributions,
+            # Full SHAP waterfall (top-10, all classes, base values)
+            "shap_waterfall": shap_result,
+            # PDP position — where this row sits on the risk curve for top features
+            "pdp_position": pdp_annotations,
+            # Confidence diagnosis — is caution warranted?
+            "confidence_diagnosis": confidence_diagnosis,
+            # Nearest casebook case — which model behavior archetype this resembles
+            "nearest_casebook_case": nearest_case,
         }
     }
 
 
-# Convert the prediction into business-friendly language.
+# Explain-risk: synthesises the full analysis bundle + inference-time local diagnostics
+# into a business explanation AND recommended action in one reasoning call.
 def explain_risk_node(state: CreditRiskState):
     logger.info(">>> explain-risk")
     prediction_output = state.prediction_output
@@ -1247,21 +1412,21 @@ def explain_risk_node(state: CreditRiskState):
         selected_model_name=prediction_output["selected_model_name"],
         evaluation_metrics=prediction_output["evaluation_metrics"],
         source_record=prediction_output["source_record"],
-        shap_contributions=prediction_output.get("shap_contributions"),
+        shap_waterfall=prediction_output.get("shap_waterfall"),
+        pdp_position=prediction_output.get("pdp_position"),
+        confidence_diagnosis=prediction_output.get("confidence_diagnosis"),
+        nearest_casebook_case=prediction_output.get("nearest_casebook_case"),
         global_shap_importance=state.global_shap_importance,
         analysis_bundle_summary=state.analysis_bundle_summary,
         selection_justification=state.selection_justification,
     )
-    logger.info("    risk_level: %s, confidence_band: %s", explanation.get("risk_level"), explanation.get("confidence_band"))
-    return {"risk_explanation": explanation}
-
-
-# Convert the explanation into an action recommendation.
-def recommend_action_node(state: CreditRiskState):
-    logger.info(">>> recommend-action")
-    action = recommend_action(state.risk_explanation, prediction_output=state.prediction_output)
-    logger.info("    action: %s", action.get("action"))
-    return {"recommended_action": action}
+    logger.info("    risk_level: %s, confidence_band: %s, caution: %s, action: %s",
+                explanation.get("risk_level"), explanation.get("confidence_band"),
+                explanation.get("confidence_assessment", {}).get("caution_level"),
+                explanation.get("recommended_action", {}).get("action"))
+    # Store recommended_action separately for downstream consumers and logging.
+    recommended_action_out = explanation.pop("recommended_action", {})
+    return {"risk_explanation": explanation, "recommended_action": recommended_action_out}
 
 
 # Good code goes to execution; failed inspection goes to repair.
@@ -1342,7 +1507,7 @@ def build_graph():
     graph.add_node("package-analysis-bundle", package_analysis_bundle_node)
     graph.add_node("run-inference", run_inference_node)
     graph.add_node("explain-risk", explain_risk_node)
-    graph.add_node("recommend-action", recommend_action_node)
+    # recommend-action merged into explain-risk — single reasoning call
 
     graph.add_edge(START, "dataset-policy-spec")
     graph.add_edge("dataset-policy-spec", "exploratory-data-analysis")
@@ -1398,8 +1563,7 @@ def build_graph():
     graph.add_edge("interpret-local-xai", "package-analysis-bundle")
     graph.add_edge("package-analysis-bundle", "run-inference")
     graph.add_edge("run-inference", "explain-risk")
-    graph.add_edge("explain-risk", "recommend-action")
-    graph.add_edge("recommend-action", END)
+    graph.add_edge("explain-risk", END)
     return graph
 
 

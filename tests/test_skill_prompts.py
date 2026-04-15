@@ -63,6 +63,10 @@ def test_preprocessing_prompts_cover_percentile_clipping_and_duration_connectors
     assert "add percentile-based clipping" in repair_prompt
     assert "Preserve the compact base-table contract" in repair_prompt
     assert "Do not \"repair\" a compact role into a wider encoding." in repair_prompt
+    assert "DataFrame.groupby(..., axis=1)" in generate_prompt
+    assert "Series.str.get_dummies() does not support `prefix=`" in generate_prompt
+    assert "DataFrame.groupby(..., axis=1)" in repair_prompt
+    assert "does not accept `prefix=` / `prefix_sep=`" in repair_prompt
     assert "Preprocessing should preserve a compact canonical base table" in spec_prompt
     assert "Structured strings should preserve information, not collapse it." in spec_prompt
     assert "`unordered_categorical` | `deferred`, `one_hot`, `ordinal_proxy`" in spec_prompt

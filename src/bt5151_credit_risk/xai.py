@@ -302,6 +302,16 @@ def compute_ale(
 
     Returns {feature: {bin_centres: [...], ale_values: {class_name: [...]}}}
     """
+    # Cast boolean columns to int8 before extracting .values.
+    # Mixed bool+float DataFrames produce an object numpy array via .values,
+    # which XGBoost rejects when we reconstruct DataFrames inside the ALE loop.
+    # This mirrors the same guard in compute_permutation_importance.
+    bool_cols = [c for c in test_frame.columns if test_frame[c].dtype == bool]
+    if bool_cols:
+        test_frame = test_frame.copy()
+        for c in bool_cols:
+            test_frame[c] = test_frame[c].astype("int8")
+
     results = {}
     for feat in top_features:
         if feat not in feature_columns:
@@ -321,7 +331,9 @@ def compute_ale(
         bin_indices = np.digitize(col_values, bin_edges[1:-1])  # assigns to bins 0..n_bins-1
 
         try:
-            X = test_frame.values.copy()
+            # astype(float) ensures a homogeneous float array even when the frame
+            # has int8 (formerly bool) columns mixed with float64 columns.
+            X = test_frame.values.copy().astype(float)
             n_effective_bins = len(bin_edges) - 1
             # For each bin, compute mean prediction difference
             ale_per_class = np.zeros((n_effective_bins, len(class_names)))
@@ -335,8 +347,9 @@ def compute_ale(
                 X_lower[:, feat_idx] = bin_edges[b]
                 X_upper[:, feat_idx] = bin_edges[b + 1]
 
-                df_lower = pd.DataFrame(X_lower, columns=feature_columns)
-                df_upper = pd.DataFrame(X_upper, columns=feature_columns)
+                # dtype=float prevents pandas from inferring object dtype from the array
+                df_lower = pd.DataFrame(X_lower, columns=feature_columns, dtype=float)
+                df_upper = pd.DataFrame(X_upper, columns=feature_columns, dtype=float)
 
                 pred_lower = model.predict_proba(df_lower)
                 pred_upper = model.predict_proba(df_upper)
@@ -375,44 +388,138 @@ def compute_shap_contributions_for_case(
     input_frame: pd.DataFrame,
     predicted_class_idx: int,
     feature_names: list[str],
-    top_n: int = 5,
-) -> list[dict]:
-    """Compute SHAP values for a single prediction row. Returns top-N features."""
+    top_n: int = 10,
+    class_names: list[str] | None = None,
+) -> dict:
+    """Compute full SHAP waterfall for a single prediction row.
+
+    Returns:
+        {
+          "predicted_class_waterfall": top-N features toward predicted class with base_value,
+          "all_classes": {class_name: [top-10 features with shap_value]},  # if class_names provided
+          "base_values": {class_name: float},  # expected model output per class
+        }
+    """
     import shap
+
+    shap_values_raw = None
+    base_values_raw = None
 
     if model_name == "logistic_regression":
         scaler = model.named_steps["scaler"]
         lr_model = model.named_steps["model"]
         scaled_input = scaler.transform(input_frame)
         explainer = shap.LinearExplainer(lr_model, scaled_input)
-        shap_values = explainer.shap_values(scaled_input)
-        if isinstance(shap_values, list):
-            class_shap = shap_values[predicted_class_idx][0]
-        elif np.array(shap_values).ndim == 3:
-            sv = np.array(shap_values)
-            class_shap = sv[0, :, predicted_class_idx] if sv.shape[0] == 1 else sv[predicted_class_idx][0]
-        else:
-            class_shap = np.array(shap_values)[0]
+        shap_values_raw = explainer.shap_values(scaled_input)
+        base_values_raw = explainer.expected_value
+    elif model_name in ("xgboost", "random_forest"):
+        explainer = shap.TreeExplainer(model)
+        shap_values_raw = explainer.shap_values(input_frame)
+        base_values_raw = explainer.expected_value
     else:
-        if model_name in ("xgboost", "random_forest"):
-            explainer = shap.TreeExplainer(model)
-        else:
-            return []
-        shap_values = explainer.shap_values(input_frame)
-        shap_arr = np.array(shap_values)
-        if shap_arr.ndim == 3:
-            class_shap = shap_arr[0, :, predicted_class_idx]
-        elif isinstance(shap_values, list):
-            class_shap = shap_values[predicted_class_idx][0]
-        else:
-            class_shap = shap_arr[0]
+        return {}
 
-    abs_shap = [(feature_names[i], float(class_shap[i])) for i in range(len(feature_names))]
-    abs_shap.sort(key=lambda x: abs(x[1]), reverse=True)
-    return [
-        {"feature": f, "shap_value": round(v, 4), "direction": "positive" if v > 0 else "negative"}
-        for f, v in abs_shap[:top_n]
-    ]
+    # Normalise to (n_classes, n_features) for a single row
+    sv = np.array(shap_values_raw)
+    if sv.ndim == 3:
+        # shape (n_rows=1, n_features, n_classes) or (n_classes, n_rows=1, n_features)
+        if sv.shape[0] == 1:
+            per_class = [sv[0, :, c] for c in range(sv.shape[2])]
+        else:
+            per_class = [sv[c][0] for c in range(sv.shape[0])]
+    elif isinstance(shap_values_raw, list):
+        per_class = [np.array(shap_values_raw[c])[0] for c in range(len(shap_values_raw))]
+    elif sv.ndim == 2:
+        per_class = [sv[0]]  # single class (binary)
+    else:
+        per_class = [sv]
+
+    # Base values per class
+    bv = np.array(base_values_raw).flatten()
+    base_values = {}
+    if class_names and len(bv) == len(class_names):
+        base_values = {cn: round(float(bv[i]), 4) for i, cn in enumerate(class_names)}
+    elif len(bv) >= 1:
+        base_values = {f"class_{i}": round(float(bv[i]), 4) for i in range(len(bv))}
+
+    # Predicted class waterfall (top_n, sorted by |SHAP|, includes base_value)
+    pred_shap = per_class[predicted_class_idx] if predicted_class_idx < len(per_class) else per_class[0]
+    ranked = sorted(enumerate(pred_shap), key=lambda x: abs(x[1]), reverse=True)
+    pred_class_name = class_names[predicted_class_idx] if class_names else str(predicted_class_idx)
+    waterfall = {
+        "class": pred_class_name,
+        "base_value": base_values.get(pred_class_name, 0.0),
+        "top_features": [
+            {
+                "feature": feature_names[i],
+                "shap_value": round(float(v), 4),
+                "direction": "toward" if v > 0 else "away_from",
+            }
+            for i, v in ranked[:top_n]
+        ],
+    }
+
+    # All-class breakdown (top 10 per class) — enables cross-class comparison
+    all_classes = {}
+    if class_names:
+        for c_idx, c_name in enumerate(class_names):
+            if c_idx >= len(per_class):
+                continue
+            c_shap = per_class[c_idx]
+            c_ranked = sorted(enumerate(c_shap), key=lambda x: abs(x[1]), reverse=True)
+            all_classes[c_name] = [
+                {
+                    "feature": feature_names[i],
+                    "shap_value": round(float(v), 4),
+                    "direction": "toward" if v > 0 else "away_from",
+                }
+                for i, v in c_ranked[:10]
+            ]
+
+    return {
+        "predicted_class_waterfall": waterfall,
+        "all_classes": all_classes,
+        "base_values": base_values,
+    }
+
+
+def annotate_pdp_position(
+    row_feature_values: dict,
+    pdp_results: dict,
+    top_n: int = 4,
+) -> list[dict]:
+    """For the top_n features (by SHAP magnitude) that have PDP curves, locate
+    where this row's feature value falls on the grid and return the class probabilities
+    at that position — giving a 'where am I on the risk curve' reading.
+
+    Returns list of {feature, feature_value, grid_position_pct, pd_values_at_position}
+    """
+    annotations = []
+    for feature, feature_val in row_feature_values.items():
+        if feature not in pdp_results:
+            continue
+        pdp = pdp_results[feature]
+        grid = pdp.get("grid", [])
+        pd_vals = pdp.get("pd_values", {})
+        if not grid:
+            continue
+        # Find nearest grid point
+        grid_arr = np.array(grid)
+        try:
+            fval = float(feature_val)
+        except (TypeError, ValueError):
+            continue
+        idx = int(np.argmin(np.abs(grid_arr - fval)))
+        position_pct = round(idx / max(len(grid) - 1, 1) * 100, 1)
+        annotations.append({
+            "feature": feature,
+            "feature_value": round(fval, 4),
+            "grid_position_pct": position_pct,  # 0=minimum, 100=maximum in training distribution
+            "pd_values_at_position": {cn: round(v[idx], 4) for cn, v in pd_vals.items() if v},
+        })
+        if len(annotations) >= top_n:
+            break
+    return annotations
 
 
 # ---------------------------------------------------------------------------

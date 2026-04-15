@@ -1,0 +1,1764 @@
+{
+  "metadata": {
+    "timestamp": "2026-04-15T05:37:43.490780+00:00",
+    "selected_model": "xgboost",
+    "selected_model_view": "tree_view",
+    "class_names": [
+      "Good",
+      "Poor",
+      "Standard"
+    ],
+    "feature_count": 37,
+    "dataset_hash": "9d058a6f",
+    "run_id": "20260415_131136"
+  },
+  "eda_hypotheses": {
+    "tested_predictions": [
+      {
+        "hypothesis": "XGBoost will outperform logistic regression by ≥5pp in macro_f1, achieving ≥0.75 vs LR’s ≤0.70, because Total_EMI_per_month (MI=0.5471, F=1.04) contributes a strong nonlinear signal that LR cannot exploit while XGBoost can",
+        "basis": "Top MI feature Total_EMI_per_month vs its bottom-ranked ANOVA F, combined with no high feature correlations",
+        "testable_at": "evaluate-models"
+      },
+      {
+        "hypothesis": "Total_EMI_per_month will rank #1 in global SHAP importance with mean |SHAP| ≥1.2× Monthly_Inhand_Salary’s mean |SHAP|, because its mutual information (0.5471) slightly exceeds Monthly_Inhand_Salary’s (0.5187) despite negligible linear separability (F=1.04 vs 1903.07)",
+        "basis": "MI disagreement with ANOVA F for Total_EMI_per_month vs Monthly_Inhand_Salary",
+        "testable_at": "global-xai"
+      },
+      {
+        "hypothesis": "A binary missingness indicator for Type_of_Loan will rank in the top-10 global SHAP features with mean |SHAP| ≥0.5, because its missing rate (11.41%) yields a max target distribution difference of 19.51%",
+        "basis": "mnar_suspect: Type_of_Loan missing_pct=0.1141, max_target_dist_diff=0.1951",
+        "testable_at": "global-xai"
+      }
+    ],
+    "supported_conjectures": [
+      {
+        "hypothesis": "Standard class will have the lowest recall (≤0.70) because its class-conditional means on both Monthly_Inhand_Salary (4242 vs Good 5389, Poor 3375) and Delay_from_due_date (19.75 vs Good 10.89, Poor 29.74) are sandwiched and weighted by Delay’s F=11471.89",
+        "basis": "class_means overlap for Standard + Delay_from_due_date F-statistic=11471.89",
+        "evidence_needed": "per-class recall and confusion matrix at evaluate-models to confirm Standard→Good dominance and asymmetric error rates"
+      },
+      {
+        "hypothesis": "In logistic regression, Total_EMI_per_month’s coefficient magnitude will rank outside the top-5 (rank ≥6), because its ANOVA F=1.04 indicates near-zero linear separability despite high MI",
+        "basis": "Total_EMI_per_month F=1.04 vs other features F≥1.8",
+        "evidence_needed": "LR coefficient magnitudes from select-model to see feature ranking"
+      }
+    ],
+    "exploratory_leads": [
+      {
+        "hypothesis": "The ratio Total_EMI_per_month / Monthly_Inhand_Salary will exceed both individual features in discriminative power (MI increase ≥10%), because their low correlation (<0.8) implies independent signals and the ratio captures repayment burden nonlinearly",
+        "basis": "no high_pairs correlations + both features in top-2 MI",
+        "how_to_test": "engineer the ratio, recompute MI and retrain XGBoost to compare SHAP and MI rankings"
+      },
+      {
+        "hypothesis": "An interaction term Delay_from_due_date × Num_Credit_Inquiries will reveal nonlinear risk segments (MI ≥0.05 improvement), since Delay_from_due_date (F=11471.89) drives linear separation and Num_Credit_Inquiries (MI=0.1114) adds orthogonal nonlinear signal",
+        "basis": "high ANOVA F for Delay_from_due_date + mid-tier MI for Num_Credit_Inquiries",
+        "how_to_test": "add interaction to feature set, measure change in tree-based model’s validation AUC and MI"
+      }
+    ],
+    "model_selection_prediction": "XGBoost will achieve macro_f1 ≥0.75, outperforming logistic regression by ≥5pp, because high MI mass in a nonlinear feature (Total_EMI_per_month MI=0.5471, F=1.04) favors boosted trees over linear models in absence of feature redundancy.",
+    "class_struggle_prediction": "Standard will have the lowest recall (≤0.70) with Standard→Good as the dominant confusion pair, driven by Standard’s class_means on Delay_from_due_date (19.75) sitting closer to Good (10.89) under the high F-statistic separation."
+  },
+  "training_diagnostics": {
+    "per_class_analysis": {
+      "Good": {
+        "struggle_level": "low",
+        "diagnosis": "High recall (~0.82 XGB) and moderate precision (~0.54) indicate Good is an easy positive class but serves as a catch‐all for misclassified Standard/Poor samples (2037 Standard→Good vs 547 Poor→Good in XGB). The model boundary around Good is broad, pulling in borderline cases from both neighbours.",
+        "confusion_flow": "Standard → Good (19.3%) and Poor → Good (9.5%), asymmetric sink for Standard"
+      },
+      "Poor": {
+        "struggle_level": "medium",
+        "diagnosis": "Recall (~0.78 XGB) and precision (~0.66) are moderate. Misclassifications split between Poor→Standard (12.3%) and Poor→Good (9.5%), slightly more flowing to Standard, suggesting overlap with mid‐risk features.",
+        "confusion_flow": "Poor → Standard (asymmetric)"
+      },
+      "Standard": {
+        "struggle_level": "high",
+        "diagnosis": "Lowest recall (~0.60 XGB) across models. Standard samples are equally lost to Good and Poor (19.3% to Good vs 21.2% to Poor in XGB), indicating that the Standard boundary is ambiguous in feature space and not skewed to one neighbour.",
+        "confusion_flow": "Standard → Poor and Standard → Good (symmetric)"
+      }
+    },
+    "capacity_analysis": {
+      "logistic_regression": "Underfitting. Best C=0.016 signals heavy L2 regularisation; macro_f1_test 0.640 vs cv 0.627 shows no overfitting but an inability to model nonlinear boundaries, leaving ~4.6pp gap to XGBoost.",
+      "random_forest": "Well‐fitted. Depth=9/min_samples_split=3 yields test macro_f1 0.678 vs cv 0.674, small gap and balanced performance indicate sufficient capacity for majority interactions without overfitting.",
+      "xgboost": "Well‐fitted with slight room for more iterations. Depth=6, lr=0.014, subsample≈0.87 yields test macro_f1 0.686 > cv 0.669, train/val mlogloss decrease in tandem without divergence; model captures nonlinear signal effectively without overfitting."
+    },
+    "confidence_analysis": "LR shows a narrow confidence gap (0.6451 vs 0.6267, Δ≈0.018), meaning poor self‐awareness. RF’s gap widens (0.6956 vs 0.6391, Δ≈0.056), and XGBoost shows the largest gap (0.7523 vs 0.6542, Δ≈0.098), indicating XGBoost “knows when it knows” and could leverage confidence thresholds.",
+    "learning_curve_interpretation": "XGBoost training and validation mlogloss decline steadily and nearly parallel, with validation plateauing near round end but no divergence—model capacity is well‐matched and still marginally improving; no sign of overfitting and slight undertraining persists.",
+    "hypothesis_validation": {
+      "tested": [
+        {
+          "original": "XGBoost will outperform logistic regression by ≥5pp in macro_f1, achieving ≥0.75 vs LR’s ≤0.70, because Total_EMI_per_month contributes a strong nonlinear signal that LR cannot exploit while XGBoost can",
+          "outcome": "refuted",
+          "actual": "XGBoost macro_f1=0.686 vs LR=0.640, gap=4.6pp and XGBoost<0.75"
+        },
+        {
+          "original": "Total_EMI_per_month will rank #1 in global SHAP importance with mean |SHAP| ≥1.2× Monthly_Inhand_Salary’s mean |SHAP|",
+          "outcome": "partially_confirmed",
+          "actual": "SHAP importances not yet computed"
+        },
+        {
+          "original": "A binary missingness indicator for Type_of_Loan will rank in the top-10 global SHAP features with mean |SHAP| ≥0.5",
+          "outcome": "partially_confirmed",
+          "actual": "Indicator not implemented; SHAP importances pending"
+        }
+      ],
+      "supported": [
+        {
+          "original": "Standard class will have the lowest recall (≤0.70) because its class-conditional means overlap those of Good and Poor",
+          "status": "strong_evidence",
+          "evidence": "Standard recall=0.562 (LR), 0.574 (RF), 0.596 (XGB), all below 0.70"
+        },
+        {
+          "original": "In logistic regression, Total_EMI_per_month’s coefficient magnitude will rank outside the top-5",
+          "status": "inconclusive",
+          "evidence": "LR coefficient magnitudes not yet examined"
+        }
+      ]
+    },
+    "new_hypotheses": {
+      "tested_predictions": [
+        {
+          "hypothesis": "Borderline Standard samples with Delay_from_due_date between 15–25 days are more likely misclassified as Poor than Good",
+          "basis": "Standard→Poor error rate slightly exceeds Standard→Good in XGB (21.2% vs 19.3%)",
+          "testable_at": "local-xai"
+        },
+        {
+          "hypothesis": "Applying class-specific probability thresholds (raising threshold for Good, lowering for Standard) will improve Standard recall by ≥3pp",
+          "basis": "XGBoost confidence gap suggests thresholding potential",
+          "testable_at": "evaluate-models"
+        }
+      ],
+      "supported_conjectures": [
+        {
+          "hypothesis": "EMI_to_Salary_Ratio produces non-zero splitting gain in XGBoost indicating it captures repayment burden interactions",
+          "basis": "XGBoost outperforming LR on nonlinear EMI/Salaries signal",
+          "evidence_needed": "Feature split importance and SHAP interaction values"
+        },
+        {
+          "hypothesis": "High Num_Credit_Inquiries amplifies misclassification rates for Standard, indicating an unmodelled interaction",
+          "basis": "Standard has large support and error variance; inquiries may refine boundary",
+          "evidence_needed": "SHAP interaction values between Num_Credit_Inquiries and class indicator"
+        }
+      ],
+      "exploratory_leads": [
+        {
+          "hypothesis": "Introduce a piecewise linear transformation of Delay_from_due_date (e.g., bins <10, 10–20, >20 days) to capture nonlinear risk tiers",
+          "basis": "Monotonic mlogloss decline but plateau suggests unmet feature expressivity",
+          "how_to_test": "Engineer binned Delay feature, retrain tree models and compare validation loss"
+        },
+        {
+          "hypothesis": "Tune XGBoost for more iterations (increase n_estimators) to exploit slow but consistent loss reduction beyond current rounds",
+          "basis": "Training curve shows continued slow loss decrease at final rounds",
+          "how_to_test": "Extend boosting rounds by 50% and measure overfitting risk via validation_1_mlogloss divergence"
+        }
+      ]
+    }
+  },
+  "global_xai_interpretation": {
+    "observations": [
+      "Interest_Rate is the top SHAP feature with mean_abs_shap=0.3988 and also the top grouped PFI feature with importance_mean=0.0709 (std=0.0052).",
+      "Outstanding_Debt ranks #2 in both SHAP (0.3103) and grouped PFI (0.0705, std=0.0047), showing strong agreement on its importance.",
+      "Delay_from_due_date is SHAP rank #6 (0.1286) but PFI rank #4 (0.0489), indicating marginal importance when shuffled but lower average individual contribution in SHAP.",
+      "Month is SHAP rank #4 (0.1662) but PFI rank #10 (0.0040), so Month drives individual predictions but causes little degradation when randomized.",
+      "Credit_Mix shows a U-shaped PDP for Poor: probability falls at mix=1 then rises at mix=2, whereas ALE is absent, suggesting a nonlinear discrete effect captured by PDP."
+    ],
+    "insights": [
+      "Features high in SHAP but low in PFI (Month, Num_Credit_Card) exert strong directional pushes in certain regions but are redundant with other features, so shuffling them does not harm performance much.",
+      "Delay_from_due_date high in PFI but lower in SHAP means it contributes via interactions—its marginal effect raises loss when removed but its individual Shapley contributions are shared with interacting features like Delay_Inquiries_Interaction."
+    ],
+    "feature_importance_consensus": {
+      "agreement": [
+        "Interest_Rate",
+        "Outstanding_Debt",
+        "Credit_Mix"
+      ],
+      "shap_only": [
+        "Month",
+        "Num_Credit_Card",
+        "Delay_Inquiries_Interaction",
+        "Changed_Credit_Limit"
+      ],
+      "pfi_only": [
+        "Delay_from_due_date",
+        "EMI_to_Salary_Ratio"
+      ],
+      "interpretation": "Agreement on top three indicates stable main effects; SHAP-only features have localized pushes captured in interactions or redundancy; PFI-only features influence loss marginally through interaction effects SHAP distributes among partners."
+    },
+    "feature_effect_shapes": {
+      "Interest_Rate": {
+        "shape": "threshold",
+        "class_direction": "Good probability rises to a peak at IR≈4 then declines; Poor and Standard probabilities generally rise for IR>12, indicating a risk threshold around mid rates."
+      },
+      "Outstanding_Debt": {
+        "shape": "u_shaped",
+        "class_direction": "Good probability dips at mid debt (≈600–1200) then rises at high debt; Poor probability rises at extreme debts; Standard probability highest at mid-level debts then falls."
+      },
+      "Credit_Mix": {
+        "shape": "u_shaped",
+        "class_direction": "Poor probability lowest at mix=1 and highest at mix=0 and 2; Good probability increases from 0→2; Standard shows peak at mix=1 then drop at 2."
+      }
+    },
+    "cross_layer_validation": {
+      "eda_to_xai": "EDA predicted that EMI_to_Salary_Ratio and Delay_Inquiries_Interaction would capture nonlinear repayment burden. Both appear in SHAP (ranks 9 and 8) and PFI (ranks 5 and 7), confirming EDA’s exploratory leads. However, Total_EMI_per_month did not surface among top SHAP features, refuting the EDA prediction that it would dominate.",
+      "training_to_xai": "Training diagnostics flagged Standard as the hardest class; global XAI shows that mid‐range Interest_Rate and Outstanding_Debt values confuse Standard (flat PDP regions), consistent with its lowest recall. High PFI for Delay_from_due_date aligns with its role in misclassifications of Poor vs Standard noted in confusion_flow.",
+      "fe_impact": "Engineered EMI_to_Salary_Ratio ranks 9th in SHAP (0.0553) and 5th in PFI (0.0109), showing expected nonlinear impact. Delay_Inquiries_Interaction ranks 8th in SHAP (0.0668) but low in PFI, consistent with it capturing interaction effects as intended."
+    },
+    "hypotheses": {
+      "tested_predictions": [
+        {
+          "hypothesis": "Removing Outstanding_Debt entirely will reduce macro_f1 by >5 percentage points and increase Standard↔Poor confusion.",
+          "basis": "Outstanding_Debt is #2 by SHAP (0.3103) and PFI (0.0705).",
+          "how_to_test": "Retrain the model dropping Outstanding_Debt and measure macro_f1 and confusion matrix shifts."
+        },
+        {
+          "hypothesis": "Binning Interest_Rate at [<=5, 6–15, >15] will improve model calibration for Good vs Poor by capturing the threshold effect seen in PDP.",
+          "basis": "PDP shows a clear threshold at IR≈4 where class probabilities diverge.",
+          "how_to_test": "Engineer the binned feature, retrain XGBoost, and compare calibration error and macro_f1."
+        },
+        {
+          "hypothesis": "Shuffling Delay_from_due_date will increase loss more when Delay_Inquiries_Interaction is present, evidencing their interaction.",
+          "basis": "PFI-high for Delay_from_due_date but SHAP attributes less to it individually than to the interaction.",
+          "how_to_test": "Compute PFI with and without Delay_Inquiries_Interaction and observe difference in importance_mean."
+        }
+      ],
+      "supported_conjectures": [
+        {
+          "hypothesis": "Delay_from_due_date contributes primarily via interaction with inquiries rather than as a standalone linear predictor.",
+          "basis": "High PFI (0.0489) but lower SHAP mean_abs_shap (0.1286) and presence of Delay_Inquiries_Interaction in SHAP top features.",
+          "evidence_needed": "Analysis of SHAP interaction values between Delay_from_due_date and Num_Credit_Inquiries."
+        },
+        {
+          "hypothesis": "Month drives prediction in specific seasonal windows but has redundant marginal effect.",
+          "basis": "Month is SHAP rank #4 (0.1662) with clear PDP peaks at certain months but PFI rank #10 (0.0040).",
+          "evidence_needed": "Assess performance drop when month is omitted vs when month is permuted to constant."
+        }
+      ],
+      "exploratory_leads": [
+        {
+          "hypothesis": "Introduce a piecewise linear transform on Outstanding_Debt (e.g., separate models for low, mid, high debt segments) to capture its U-shaped effect and reduce Standard misclassification.",
+          "basis": "Outstanding_Debt PDP shows a nonmonotonic U shape for Good predictions.",
+          "implication": "Better segmenting debt levels could sharpen class boundaries and boost Standard recall."
+        },
+        {
+          "hypothesis": "Add an interaction of Interest_Rate × EMI_to_Salary_Ratio to capture joint effects of rate and repayment burden, potentially raising SHAP importance beyond parent features.",
+          "basis": "Both features are top‐3 in SHAP/PFI and likely interact nonlinearly.",
+          "implication": "Capturing this joint signal could improve macro_f1, particularly for distinguishing Poor vs Standard at high rates and burdens."
+        },
+        {
+          "hypothesis": "Calibrate thresholds for Good and Poor classes based on confidence to trade off precision/recall and improve Standard recall by ≥3pp.",
+          "basis": "Training diagnostics show XGBoost has a large confidence gap (Δ≈0.098) and asymmetric confusion flows.",
+          "implication": "Threshold tuning could mitigate the broad Good sink and recover Standard cases."
+        }
+      ]
+    }
+  },
+  "local_xai_interpretation": {
+    "per_class_stories": {
+      "Good": {
+        "representative_profile": "Row 4577: model nails Good when Num_Credit_Card is high (SHAP 0.8223), Interest_Rate is elevated (0.5490), and Credit_Mix is positive (0.2854).",
+        "borderline_story": "Row 8118: borderline Good (conf 0.3773) sees Interest_Rate (0.5316) pushing Good but low Num_Credit_Card (–0.3228) and weak Credit_Mix (–0.1127) pulling toward others, revealing a thin threshold on card count.",
+        "worst_misclassification_story": "Row 15594: true Good→predicted Standard (conf 0.9338) because Month (0.5269) and Credit_Mix (0.4693) dominated, overpowering Good signals."
+      },
+      "Poor": {
+        "representative_profile": "Row 2970: model correctly flags Poor when Interest_Rate is high (0.7708), Num_Credit_Card is elevated (0.2611), and Outstanding_Debt is large (0.2301).",
+        "borderline_story": "Row 12835: borderline Poor (conf 0.3456) is swayed by low Outstanding_Debt (–0.2273) and short Delay_from_due_date (–0.1634), showing the boundary around mid‐debt levels is fragile.",
+        "worst_misclassification_story": "Row 97: true Poor→predicted Standard (conf 0.8983) driven by Month (0.5036) and Credit_Mix (0.4272) pushing into Standard territory."
+      },
+      "Standard": {
+        "representative_profile": "Row 10129: model easily picks Standard when Month is high (0.6308), Credit_Mix is positive (0.4550), and Outstanding_Debt is significant (0.4534).",
+        "borderline_story": "Row 12315: borderline Standard (conf 0.3521) is tugged down by low Num_Bank_Accounts (–0.3340) against modest Credit_Mix (0.1386), pinpointing a fragile Standard vs Good boundary on account count.",
+        "worst_misclassification_story": "Row 5976: true Standard→predicted Good (conf 0.9662) primarily due to heavy Num_Credit_Card (0.8132) and high Interest_Rate (0.4823) driving it into Good."
+      }
+    },
+    "confusion_patterns": {
+      "dominant_direction": "Standard → Good asymmetry: model over-predicts Good under uncertainty",
+      "shared_features_in_failures": [
+        "Interest_Rate",
+        "Credit_Mix",
+        "Outstanding_Debt",
+        "Payment_of_Min_Amount_yes",
+        "Month"
+      ],
+      "boundary_features": [
+        "Interest_Rate",
+        "Outstanding_Debt",
+        "Delay_from_due_date"
+      ]
+    },
+    "global_vs_local_consistency": {
+      "global_features_confirmed_locally": [
+        "Interest_Rate",
+        "Outstanding_Debt",
+        "Credit_Mix"
+      ],
+      "global_features_absent_in_failures": [],
+      "local_only_features": [
+        "Payment_Behaviour_High_spent_Large_value_payments",
+        "Changed_Credit_Limit",
+        "EMI_to_Salary_Ratio",
+        "Annual_Income"
+      ]
+    },
+    "decision_boundary_analysis": {
+      "thinnest_boundary": "Standard vs Good boundary is most fragile, defined by Num_Bank_Accounts (row 12315 SHAP –0.3340).",
+      "boundary_candidate_for_engineering": "Bin Num_Bank_Accounts into categories (e.g., ≤2, 3–5, >5) to amplify its discriminatory power at the Standard/Good boundary, as evidenced by row 12315."
+    },
+    "hypotheses": {
+      "tested_predictions": [
+        {
+          "hypothesis": "Good cases with Month >6 and Credit_Mix =2 are misclassified as Standard at >90% rate",
+          "basis": "Row 15594 shows Month (0.5269) and Credit_Mix (0.4693) driving Good→Standard error",
+          "how_to_test": "Filter Good samples where Month>6 and Credit_Mix=2 and compute their misclassification rate into Standard."
+        }
+      ],
+      "supported_conjectures": [
+        {
+          "hypothesis": "High Num_Credit_Card count pushes Standard cases into Good",
+          "basis": "Row 5976 exhibits Num_Credit_Card (0.8132) driving Standard→Good misclassification",
+          "evidence_needed": "Compare Num_Credit_Card SHAP values between correctly classified and misclassified Standard samples."
+        }
+      ],
+      "exploratory_leads": [
+        {
+          "hypothesis": "Interaction of Delay_from_due_date × Payment_of_Min_Amount_yes could separate borderline Good vs Standard cases",
+          "basis": "Rows 8118 and 15594 both show these features jointly influencing class",
+          "implication": "Explicitly modeling this interaction may thicken the Good/Standard boundary and reduce misclassification."
+        }
+      ]
+    }
+  },
+  "local_casebook": [
+    {
+      "row_index": 4577,
+      "true_label": "Good",
+      "predicted_label": "Good",
+      "probabilities": {
+        "Good": 0.9703,
+        "Poor": 0.0008,
+        "Standard": 0.029
+      },
+      "case_type": "representative",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": 0.8223,
+          "direction": "positive"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.549,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.2854,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.2303,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": 0.15,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.0467,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_History_Age",
+          "shap_value": 0.0392,
+          "direction": "positive"
+        },
+        {
+          "feature": "Monthly_Inhand_Salary",
+          "shap_value": 0.039,
+          "direction": "positive"
+        },
+        {
+          "feature": "Annual_Income",
+          "shap_value": 0.0365,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_of_Delayed_Payment",
+          "shap_value": 0.0311,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 8118,
+      "true_label": "Good",
+      "predicted_label": "Good",
+      "probabilities": {
+        "Good": 0.3773,
+        "Poor": 0.3406,
+        "Standard": 0.2821
+      },
+      "case_type": "borderline",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.5316,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": -0.3228,
+          "direction": "negative"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": 0.1674,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": -0.1127,
+          "direction": "negative"
+        },
+        {
+          "feature": "Payment_Behaviour_Low_spent_Small_value_payments",
+          "shap_value": -0.1123,
+          "direction": "negative"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.0925,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.0758,
+          "direction": "positive"
+        },
+        {
+          "feature": "Monthly_Inhand_Salary",
+          "shap_value": -0.047,
+          "direction": "negative"
+        },
+        {
+          "feature": "Month",
+          "shap_value": 0.0456,
+          "direction": "positive"
+        },
+        {
+          "feature": "Amount_invested_monthly",
+          "shap_value": -0.0436,
+          "direction": "negative"
+        }
+      ]
+    },
+    {
+      "row_index": 15594,
+      "true_label": "Good",
+      "predicted_label": "Standard",
+      "probabilities": {
+        "Good": 0.0366,
+        "Poor": 0.0296,
+        "Standard": 0.9338
+      },
+      "case_type": "worst_misclassification",
+      "confused_with_class": "Standard",
+      "shap_contributions": [
+        {
+          "feature": "Month",
+          "shap_value": 0.5269,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.4693,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.3212,
+          "direction": "positive"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.2188,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.1835,
+          "direction": "positive"
+        },
+        {
+          "feature": "Changed_Credit_Limit",
+          "shap_value": 0.0829,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_of_Delayed_Payment",
+          "shap_value": 0.0739,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "shap_value": 0.0661,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Bank_Accounts",
+          "shap_value": 0.0451,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_Inquiries_Interaction",
+          "shap_value": 0.0321,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 2970,
+      "true_label": "Poor",
+      "predicted_label": "Poor",
+      "probabilities": {
+        "Good": 0.001,
+        "Poor": 0.9484,
+        "Standard": 0.0506
+      },
+      "case_type": "representative",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.7708,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": 0.2611,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.2301,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_Inquiries_Interaction",
+          "shap_value": 0.224,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": 0.2158,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_Behaviour_Low_spent_Medium_value_payments",
+          "shap_value": 0.1616,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_History_Age",
+          "shap_value": 0.0665,
+          "direction": "positive"
+        },
+        {
+          "feature": "Monthly_Balance",
+          "shap_value": 0.0479,
+          "direction": "positive"
+        },
+        {
+          "feature": "EMI_to_Salary_Ratio",
+          "shap_value": 0.0467,
+          "direction": "positive"
+        },
+        {
+          "feature": "Amount_invested_monthly",
+          "shap_value": 0.0372,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 12835,
+      "true_label": "Poor",
+      "predicted_label": "Poor",
+      "probabilities": {
+        "Good": 0.3218,
+        "Poor": 0.3456,
+        "Standard": 0.3325
+      },
+      "case_type": "borderline",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": -0.2273,
+          "direction": "negative"
+        },
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": 0.1733,
+          "direction": "positive"
+        },
+        {
+          "feature": "Monthly_Balance",
+          "shap_value": 0.1686,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": -0.1634,
+          "direction": "negative"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": -0.1618,
+          "direction": "negative"
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "shap_value": -0.1421,
+          "direction": "negative"
+        },
+        {
+          "feature": "Annual_Income",
+          "shap_value": -0.1351,
+          "direction": "negative"
+        },
+        {
+          "feature": "Monthly_Inhand_Salary",
+          "shap_value": 0.1076,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Bank_Accounts",
+          "shap_value": 0.0812,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_Inquiries_Interaction",
+          "shap_value": -0.077,
+          "direction": "negative"
+        }
+      ]
+    },
+    {
+      "row_index": 97,
+      "true_label": "Poor",
+      "predicted_label": "Standard",
+      "probabilities": {
+        "Good": 0.0704,
+        "Poor": 0.0313,
+        "Standard": 0.8983
+      },
+      "case_type": "worst_misclassification",
+      "confused_with_class": "Standard",
+      "shap_contributions": [
+        {
+          "feature": "Month",
+          "shap_value": 0.5036,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.4272,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.2839,
+          "direction": "positive"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.2125,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.2034,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_of_Delayed_Payment",
+          "shap_value": 0.0984,
+          "direction": "positive"
+        },
+        {
+          "feature": "EMI_to_Salary_Ratio",
+          "shap_value": 0.0807,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "shap_value": 0.059,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Bank_Accounts",
+          "shap_value": 0.0422,
+          "direction": "positive"
+        },
+        {
+          "feature": "Annual_Income",
+          "shap_value": 0.0416,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 10129,
+      "true_label": "Standard",
+      "predicted_label": "Standard",
+      "probabilities": {
+        "Good": 0.0076,
+        "Poor": 0.0098,
+        "Standard": 0.9826
+      },
+      "case_type": "representative",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Month",
+          "shap_value": 0.6308,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.455,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.4534,
+          "direction": "positive"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.4509,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_History_Age",
+          "shap_value": 0.1277,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "shap_value": 0.0924,
+          "direction": "positive"
+        },
+        {
+          "feature": "Total_EMI_per_month",
+          "shap_value": 0.0779,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.0725,
+          "direction": "positive"
+        },
+        {
+          "feature": "Changed_Credit_Limit",
+          "shap_value": 0.0662,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": 0.0494,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 12315,
+      "true_label": "Standard",
+      "predicted_label": "Standard",
+      "probabilities": {
+        "Good": 0.3494,
+        "Poor": 0.2985,
+        "Standard": 0.3521
+      },
+      "case_type": "borderline",
+      "confused_with_class": null,
+      "shap_contributions": [
+        {
+          "feature": "Num_Bank_Accounts",
+          "shap_value": -0.334,
+          "direction": "negative"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.1386,
+          "direction": "positive"
+        },
+        {
+          "feature": "Monthly_Inhand_Salary",
+          "shap_value": 0.0815,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": -0.0802,
+          "direction": "negative"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.0733,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": -0.048,
+          "direction": "negative"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.0478,
+          "direction": "positive"
+        },
+        {
+          "feature": "Month",
+          "shap_value": -0.0466,
+          "direction": "negative"
+        },
+        {
+          "feature": "Total_EMI_per_month",
+          "shap_value": 0.0417,
+          "direction": "positive"
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "shap_value": 0.0351,
+          "direction": "positive"
+        }
+      ]
+    },
+    {
+      "row_index": 5976,
+      "true_label": "Standard",
+      "predicted_label": "Good",
+      "probabilities": {
+        "Good": 0.9662,
+        "Poor": 0.0007,
+        "Standard": 0.0331
+      },
+      "case_type": "worst_misclassification",
+      "confused_with_class": "Good",
+      "shap_contributions": [
+        {
+          "feature": "Num_Credit_Card",
+          "shap_value": 0.8132,
+          "direction": "positive"
+        },
+        {
+          "feature": "Interest_Rate",
+          "shap_value": 0.4823,
+          "direction": "positive"
+        },
+        {
+          "feature": "Credit_Mix",
+          "shap_value": 0.2591,
+          "direction": "positive"
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "shap_value": 0.2049,
+          "direction": "positive"
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "shap_value": 0.1355,
+          "direction": "positive"
+        },
+        {
+          "feature": "Annual_Income",
+          "shap_value": 0.1123,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_Behaviour_High_spent_Large_value_payments",
+          "shap_value": 0.0833,
+          "direction": "positive"
+        },
+        {
+          "feature": "Payment_of_Min_Amount_yes",
+          "shap_value": 0.0627,
+          "direction": "positive"
+        },
+        {
+          "feature": "Month",
+          "shap_value": -0.0581,
+          "direction": "negative"
+        },
+        {
+          "feature": "Payment_Behaviour_Low_spent_Small_value_payments",
+          "shap_value": 0.0314,
+          "direction": "positive"
+        }
+      ]
+    }
+  ],
+  "feature_engineering_hypothesis": {
+    "interactions_rationale": "Added EMI_to_Salary_Ratio because Total_EMI_per_month (MI=0.5471) and Monthly_Inhand_Salary (MI=0.5187) are the top two discriminative features; the ratio captures repayment burden nonlinearly as per the exploratory lead predicting >10% MI increase. Added Delay_Inquiries_Interaction because Delay_from_due_date (MI=0.1215, F=11471.89) and Num_Credit_Inquiries (MI=0.1114) are mid-tier predictors; their product should reveal risk segments not captured individually.",
+    "dropped_features_rationale": "Dropped Credit_Utilization_Ratio (MI=0.0) for zero information. Dropped Payment_of_Min_Amount_no because it is perfectly anti-correlated (r=–1) with Payment_of_Min_Amount_yes, rendering it redundant.",
+    "expected_impact": "Expect EMI_to_Salary_Ratio to surpass parent features in MI and improve both linear and tree model discrimination on repayment stress. Delay_Inquiries_Interaction should boost tree-based AUC by capturing joint nonlinear risk effects. Removing zero-MI and redundant features reduces dimensionality, speeding training and reducing overfitting.",
+    "eda_hypotheses_acted_on": [
+      "Exploratory lead: Total_EMI_per_month / Monthly_Inhand_Salary ratio (implemented).",
+      "Exploratory lead: Delay_from_due_date × Num_Credit_Inquiries interaction (implemented).",
+      "Tested prediction: missingness indicator for Type_of_Loan not implemented because loan types are already represented as multi-hot binaries, making an explicit missing flag redundant."
+    ]
+  },
+  "selection_justification": "XGBoost achieved the highest macro_f1 score (0.6862) and accuracy (0.6903) among all models, indicating it performs well across all classes. It also maintained a reasonable gap between CV and test scores, suggesting a balance between performance and generalization. Additionally, XGBoost's ability to handle complex interactions makes it well-suited for capturing the nonlinear effects outlined in the feature engineering hypothesis.",
+  "numeric_artifacts": {
+    "shap_importance": [
+      {
+        "feature": "Interest_Rate",
+        "mean_abs_shap": 0.3988
+      },
+      {
+        "feature": "Outstanding_Debt",
+        "mean_abs_shap": 0.3103
+      },
+      {
+        "feature": "Credit_Mix",
+        "mean_abs_shap": 0.1956
+      },
+      {
+        "feature": "Month",
+        "mean_abs_shap": 0.1662
+      },
+      {
+        "feature": "Num_Credit_Card",
+        "mean_abs_shap": 0.1309
+      },
+      {
+        "feature": "Delay_from_due_date",
+        "mean_abs_shap": 0.1286
+      },
+      {
+        "feature": "Changed_Credit_Limit",
+        "mean_abs_shap": 0.0829
+      },
+      {
+        "feature": "Delay_Inquiries_Interaction",
+        "mean_abs_shap": 0.0668
+      },
+      {
+        "feature": "EMI_to_Salary_Ratio",
+        "mean_abs_shap": 0.0553
+      },
+      {
+        "feature": "Payment_Behaviour_Low_spent_Small_value_payments",
+        "mean_abs_shap": 0.0486
+      },
+      {
+        "feature": "Num_Bank_Accounts",
+        "mean_abs_shap": 0.0478
+      },
+      {
+        "feature": "Payment_of_Min_Amount_yes",
+        "mean_abs_shap": 0.0466
+      },
+      {
+        "feature": "Num_of_Delayed_Payment",
+        "mean_abs_shap": 0.0455
+      },
+      {
+        "feature": "Num_of_Loan",
+        "mean_abs_shap": 0.0447
+      },
+      {
+        "feature": "Credit_History_Age",
+        "mean_abs_shap": 0.0433
+      }
+    ],
+    "shap_dependence_features": [
+      "Interest_Rate",
+      "Outstanding_Debt",
+      "Credit_Mix"
+    ],
+    "pfi": {
+      "raw": [
+        {
+          "feature": "Interest_Rate",
+          "importance_mean": 0.0714,
+          "importance_std": 0.004
+        },
+        {
+          "feature": "Outstanding_Debt",
+          "importance_mean": 0.0694,
+          "importance_std": 0.0052
+        },
+        {
+          "feature": "Credit_Mix",
+          "importance_mean": 0.0542,
+          "importance_std": 0.0038
+        },
+        {
+          "feature": "Delay_from_due_date",
+          "importance_mean": 0.0499,
+          "importance_std": 0.0034
+        },
+        {
+          "feature": "EMI_to_Salary_Ratio",
+          "importance_mean": 0.0106,
+          "importance_std": 0.0016
+        },
+        {
+          "feature": "Num_Bank_Accounts",
+          "importance_mean": 0.0099,
+          "importance_std": 0.0014
+        },
+        {
+          "feature": "Changed_Credit_Limit",
+          "importance_mean": 0.0086,
+          "importance_std": 0.0011
+        },
+        {
+          "feature": "Num_of_Delayed_Payment",
+          "importance_mean": 0.0085,
+          "importance_std": 0.0011
+        },
+        {
+          "feature": "Num_Credit_Card",
+          "importance_mean": 0.0084,
+          "importance_std": 0.0014
+        },
+        {
+          "feature": "Credit_History_Age",
+          "importance_mean": 0.0052,
+          "importance_std": 0.0025
+        },
+        {
+          "feature": "Month",
+          "importance_mean": 0.0037,
+          "importance_std": 0.0013
+        },
+        {
+          "feature": "Total_EMI_per_month",
+          "importance_mean": 0.0021,
+          "importance_std": 0.001
+        },
+        {
+          "feature": "Monthly_Balance",
+          "importance_mean": 0.0015,
+          "importance_std": 0.0008
+        },
+        {
+          "feature": "Type_of_Loan_Personal_Loan",
+          "importance_mean": 0.0015,
+          "importance_std": 0.0004
+        },
+        {
+          "feature": "Num_of_Loan",
+          "importance_mean": 0.0008,
+          "importance_std": 0.0014
+        },
+        {
+          "feature": "Payment_Behaviour_Low_spent_Small_value_payments",
+          "importance_mean": 0.0005,
+          "importance_std": 0.0008
+        },
+        {
+          "feature": "Num_Credit_Inquiries",
+          "importance_mean": 0.0004,
+          "importance_std": 0.0012
+        },
+        {
+          "feature": "Type_of_Loan_Credit-Builder_Loan",
+          "importance_mean": 0.0003,
+          "importance_std": 0.0003
+        },
+        {
+          "feature": "Type_of_Loan_Payday_Loan",
+          "importance_mean": 0.0001,
+          "importance_std": 0.0003
+        },
+        {
+          "feature": "Payment_Behaviour_High_spent_Large_value_payments",
+          "importance_mean": 0.0001,
+          "importance_std": 0.0009
+        }
+      ],
+      "grouped": [
+        {
+          "original_feature": "Interest_Rate",
+          "importance_mean": 0.0709,
+          "importance_std": 0.0052,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Outstanding_Debt",
+          "importance_mean": 0.0705,
+          "importance_std": 0.0047,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Credit_Mix",
+          "importance_mean": 0.0566,
+          "importance_std": 0.0023,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Delay_from_due_date",
+          "importance_mean": 0.0489,
+          "importance_std": 0.0023,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "EMI_to_Salary_Ratio",
+          "importance_mean": 0.0109,
+          "importance_std": 0.002,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Num_Bank_Accounts",
+          "importance_mean": 0.009,
+          "importance_std": 0.0023,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Num_of_Delayed_Payment",
+          "importance_mean": 0.0087,
+          "importance_std": 0.0016,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Changed_Credit_Limit",
+          "importance_mean": 0.0085,
+          "importance_std": 0.0015,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Num_Credit_Card",
+          "importance_mean": 0.0072,
+          "importance_std": 0.0016,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Month",
+          "importance_mean": 0.004,
+          "importance_std": 0.0018,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Credit_History_Age",
+          "importance_mean": 0.0035,
+          "importance_std": 0.001,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Total_EMI_per_month",
+          "importance_mean": 0.0028,
+          "importance_std": 0.0011,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Monthly_Balance",
+          "importance_mean": 0.0017,
+          "importance_std": 0.0009,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Type_of_Loan_Personal_Loan",
+          "importance_mean": 0.0015,
+          "importance_std": 0.0006,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Payment_Behaviour_Low_spent_Small_value_payments",
+          "importance_mean": 0.0011,
+          "importance_std": 0.0006,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Num_Credit_Inquiries",
+          "importance_mean": 0.0008,
+          "importance_std": 0.0009,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Payment_Behaviour_High_spent_Large_value_payments",
+          "importance_mean": 0.0003,
+          "importance_std": 0.0008,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Type_of_Loan_Credit-Builder_Loan",
+          "importance_mean": 0.0001,
+          "importance_std": 0.0003,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Payment_Behaviour_Low_spent_Medium_value_payments",
+          "importance_mean": 0.0001,
+          "importance_std": 0.0009,
+          "n_columns": 1
+        },
+        {
+          "original_feature": "Payment_Behaviour_Low_spent_Large_value_payments",
+          "importance_mean": -0.0,
+          "importance_std": 0.0001,
+          "n_columns": 1
+        }
+      ]
+    },
+    "pdp": {
+      "Interest_Rate": {
+        "grid": [
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0,
+          12.0,
+          13.0,
+          14.0,
+          15.0,
+          16.0,
+          17.0,
+          18.0,
+          19.0,
+          20.0,
+          21.0,
+          22.0,
+          23.0,
+          24.0,
+          25.0,
+          26.0,
+          27.0,
+          28.0,
+          29.0,
+          30.0,
+          31.0,
+          32.0,
+          33.0,
+          34.0,
+          75.0,
+          76.0
+        ],
+        "pd_values": {
+          "Good": [
+            0.348816,
+            0.35524,
+            0.356517,
+            0.366488,
+            0.282868,
+            0.280251,
+            0.279263,
+            0.279722,
+            0.278514,
+            0.278088,
+            0.281207,
+            0.281321,
+            0.193686,
+            0.191798,
+            0.190393,
+            0.186689,
+            0.165954,
+            0.162639,
+            0.162796,
+            0.159214,
+            0.121241,
+            0.118781,
+            0.118236,
+            0.107329,
+            0.104474,
+            0.104445,
+            0.104099,
+            0.104353,
+            0.104468,
+            0.103067,
+            0.102733,
+            0.10272,
+            0.106457,
+            0.111372,
+            0.13911,
+            0.13911
+          ],
+          "Poor": [
+            0.275868,
+            0.274312,
+            0.269905,
+            0.280035,
+            0.228239,
+            0.226823,
+            0.238932,
+            0.240529,
+            0.242018,
+            0.240479,
+            0.236952,
+            0.233359,
+            0.238611,
+            0.241879,
+            0.332423,
+            0.338979,
+            0.346638,
+            0.342814,
+            0.342808,
+            0.344091,
+            0.487646,
+            0.49713,
+            0.500042,
+            0.504771,
+            0.501506,
+            0.500629,
+            0.502382,
+            0.50209,
+            0.501936,
+            0.501366,
+            0.497642,
+            0.495887,
+            0.489097,
+            0.514907,
+            0.412124,
+            0.412124
+          ],
+          "Standard": [
+            0.375317,
+            0.370448,
+            0.373577,
+            0.353476,
+            0.488892,
+            0.492927,
+            0.481806,
+            0.479748,
+            0.479468,
+            0.481436,
+            0.481842,
+            0.48532,
+            0.567701,
+            0.56632,
+            0.477183,
+            0.474331,
+            0.48741,
+            0.494547,
+            0.494397,
+            0.496691,
+            0.391113,
+            0.384089,
+            0.381723,
+            0.3879,
+            0.394024,
+            0.39493,
+            0.393519,
+            0.393558,
+            0.393594,
+            0.395568,
+            0.399624,
+            0.401394,
+            0.404447,
+            0.37372,
+            0.448767,
+            0.448767
+          ]
+        }
+      },
+      "Outstanding_Debt": {
+        "grid": [
+          126.6779,
+          203.9794,
+          281.2808,
+          358.5823,
+          435.8838,
+          513.1853,
+          590.4867,
+          667.7882,
+          745.0897,
+          822.3911,
+          899.6926,
+          976.9941,
+          1054.2956,
+          1131.597,
+          1208.8985,
+          1286.2,
+          1363.5014,
+          1440.8029,
+          1518.1044,
+          1595.4059,
+          1672.7073,
+          1750.0088,
+          1827.3103,
+          1904.6117,
+          1981.9132,
+          2059.2147,
+          2136.5162,
+          2213.8176,
+          2291.1191,
+          2368.4206,
+          2445.722,
+          2523.0235,
+          2600.325,
+          2677.6265,
+          2754.9279,
+          2832.2294,
+          2909.5309,
+          2986.8323,
+          3064.1338,
+          3141.4353,
+          3218.7368,
+          3296.0382,
+          3373.3397,
+          3450.6412,
+          3527.9426,
+          3605.2441,
+          3682.5456,
+          3759.8471,
+          3837.1485,
+          3914.45
+        ],
+        "pd_values": {
+          "Good": [
+            0.265693,
+            0.255239,
+            0.265996,
+            0.269664,
+            0.277916,
+            0.268151,
+            0.271269,
+            0.273212,
+            0.273542,
+            0.272102,
+            0.264751,
+            0.264261,
+            0.265944,
+            0.260211,
+            0.258248,
+            0.25479,
+            0.256971,
+            0.254149,
+            0.162541,
+            0.150002,
+            0.150388,
+            0.150554,
+            0.15621,
+            0.156939,
+            0.159593,
+            0.158827,
+            0.166935,
+            0.172005,
+            0.173396,
+            0.173215,
+            0.178235,
+            0.181205,
+            0.180606,
+            0.180984,
+            0.178334,
+            0.177829,
+            0.177611,
+            0.17761,
+            0.178244,
+            0.178352,
+            0.179884,
+            0.179017,
+            0.177899,
+            0.173723,
+            0.173668,
+            0.172045,
+            0.172049,
+            0.172556,
+            0.173747,
+            0.173459
+          ],
+          "Poor": [
+            0.193787,
+            0.190199,
+            0.199832,
+            0.186302,
+            0.194623,
+            0.19763,
+            0.196294,
+            0.196486,
+            0.199297,
+            0.202844,
+            0.21142,
+            0.210761,
+            0.209447,
+            0.226922,
+            0.275927,
+            0.372689,
+            0.364707,
+            0.364699,
+            0.47182,
+            0.4883,
+            0.486252,
+            0.48611,
+            0.484104,
+            0.483764,
+            0.482779,
+            0.48315,
+            0.483545,
+            0.48144,
+            0.483656,
+            0.483164,
+            0.480023,
+            0.471198,
+            0.454576,
+            0.447792,
+            0.440683,
+            0.434931,
+            0.434211,
+            0.433728,
+            0.433114,
+            0.43325,
+            0.431894,
+            0.430227,
+            0.432124,
+            0.432945,
+            0.433056,
+            0.434404,
+            0.434508,
+            0.437057,
+            0.435984,
+            0.435696
+          ],
+          "Standard": [
+            0.540518,
+            0.55456,
+            0.534174,
+            0.544033,
+            0.527463,
+            0.534217,
+            0.532438,
+            0.530305,
+            0.527163,
+            0.525056,
+            0.523829,
+            0.524977,
+            0.524609,
+            0.512868,
+            0.465826,
+            0.372521,
+            0.378321,
+            0.381152,
+            0.36564,
+            0.361699,
+            0.363359,
+            0.363335,
+            0.359688,
+            0.359298,
+            0.357628,
+            0.358024,
+            0.34952,
+            0.346553,
+            0.342949,
+            0.343622,
+            0.34174,
+            0.347595,
+            0.364817,
+            0.371225,
+            0.380984,
+            0.387238,
+            0.388176,
+            0.388664,
+            0.388642,
+            0.388398,
+            0.388222,
+            0.390757,
+            0.389978,
+            0.393333,
+            0.393275,
+            0.39355,
+            0.393443,
+            0.390388,
+            0.390271,
+            0.390846
+          ]
+        }
+      },
+      "Credit_Mix": {
+        "grid": [
+          0.0,
+          1.0,
+          2.0
+        ],
+        "pd_values": {
+          "Good": [
+            0.20977,
+            0.235716,
+            0.382291
+          ],
+          "Poor": [
+            0.393893,
+            0.336062,
+            0.393853
+          ],
+          "Standard": [
+            0.396336,
+            0.428221,
+            0.223857
+          ]
+        }
+      },
+      "Month": {
+        "grid": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0
+        ],
+        "pd_values": {
+          "Good": [
+            0.217313,
+            0.217385,
+            0.217315,
+            0.278841,
+            0.278637,
+            0.279194,
+            0.283211,
+            0.283098
+          ],
+          "Poor": [
+            0.329369,
+            0.329327,
+            0.328814,
+            0.346519,
+            0.3477,
+            0.347998,
+            0.345943,
+            0.345973
+          ],
+          "Standard": [
+            0.453318,
+            0.453288,
+            0.453869,
+            0.374641,
+            0.373666,
+            0.372807,
+            0.370846,
+            0.37093
+          ]
+        }
+      },
+      "Num_Credit_Card": {
+        "grid": [
+          0.0,
+          1.0,
+          2.0,
+          3.0,
+          4.0,
+          5.0,
+          6.0,
+          7.0,
+          8.0,
+          9.0,
+          10.0,
+          11.0,
+          15.0,
+          24.0,
+          25.0,
+          27.0,
+          36.0,
+          37.0,
+          38.0,
+          39.0,
+          43.0,
+          44.0,
+          48.0,
+          49.0
+        ],
+        "pd_values": {
+          "Good": [
+            0.388213,
+            0.388213,
+            0.388371,
+            0.258481,
+            0.258271,
+            0.25868,
+            0.211096,
+            0.211525,
+            0.207283,
+            0.189184,
+            0.167955,
+            0.167969,
+            0.167969,
+            0.168104,
+            0.168104,
+            0.167809,
+            0.161585,
+            0.161585,
+            0.161585,
+            0.161585,
+            0.163199,
+            0.163199,
+            0.163199,
+            0.163199
+          ],
+          "Poor": [
+            0.252004,
+            0.252004,
+            0.252046,
+            0.331241,
+            0.333362,
+            0.341572,
+            0.361478,
+            0.363927,
+            0.389708,
+            0.396968,
+            0.402039,
+            0.40067,
+            0.40067,
+            0.399615,
+            0.399615,
+            0.399726,
+            0.385391,
+            0.385391,
+            0.385391,
+            0.385391,
+            0.38481,
+            0.38481,
+            0.38481,
+            0.38481
+          ],
+          "Standard": [
+            0.359785,
+            0.359785,
+            0.359584,
+            0.410279,
+            0.408367,
+            0.399748,
+            0.427427,
+            0.424548,
+            0.40301,
+            0.413848,
+            0.430006,
+            0.431361,
+            0.431361,
+            0.432282,
+            0.432282,
+            0.432465,
+            0.453025,
+            0.453025,
+            0.453025,
+            0.453025,
+            0.45199,
+            0.45199,
+            0.45199,
+            0.45199
+          ]
+        }
+      }
+    },
+    "ale": null,
+    "methods_used": [
+      "shap",
+      "pfi_grouped",
+      "pdp"
+    ]
+  }
+}
