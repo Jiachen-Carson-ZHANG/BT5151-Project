@@ -62,7 +62,8 @@ class CreditRiskState(BaseModel):
     global_shap_importance: list | None = None
     global_xai_results: dict | None = None
     local_xai_cases: list[dict] | None = None
-    xai_interpretation: dict | None = None
+    global_xai_interpretation: dict | None = None
+    local_xai_interpretation: dict | None = None
     analysis_bundle: dict | None = None
     analysis_bundle_summary: dict | None = None
     inference_input: dict | None = None

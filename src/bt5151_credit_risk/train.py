@@ -261,8 +261,10 @@ def build_candidate_models():
             )),
         ]),
         "random_forest": RandomForestClassifier(
-            n_estimators=200,
+            n_estimators=300,
             max_depth=15,
+            min_samples_leaf=2,
+            max_features="sqrt",
             class_weight="balanced",
             random_state=RANDOM_SEED,
             n_jobs=-1,
@@ -360,6 +362,9 @@ def tune_models(
         tune_group_values = train_group_values
         tune_time_values = train_time_values
 
+    # Log class balance of tuning subset — flag if any class drops below 5%.
+    _log_class_balance("tuning subset", tune_target)
+
     cv_splits = _build_cv_splits(
         tune_target,
         policy,
@@ -400,11 +405,15 @@ def tune_models(
             def objective(trial):
                 params = _suggest_params(trial, g_spec, m_name)
                 scores = []
-                for train_idx, val_idx in cv_splits:
+                for fold_i, (train_idx, val_idx) in enumerate(cv_splits):
                     X_train = tune_frame.iloc[train_idx]
                     X_val = tune_frame.iloc[val_idx]
                     y_train = tune_target.iloc[train_idx]
                     y_val = tune_target.iloc[val_idx]
+                    # Log fold balance on trial 0 only to avoid log spam.
+                    if trial.number == 0:
+                        _log_class_balance(f"{m_name} fold {fold_i} train", y_train)
+                        _log_class_balance(f"{m_name} fold {fold_i} val", y_val)
 
                     cloned = clone(m_model)
                     cloned.set_params(**params)
@@ -545,6 +554,21 @@ def extract_learning_curves(model, model_name):
         return curves
     except Exception:
         return None
+
+
+def _log_class_balance(label: str, target) -> None:
+    """Log per-class counts and warn if any class falls below 5% of total."""
+    counts = pd.Series(target).value_counts().sort_index()
+    total = counts.sum()
+    parts = ", ".join(f"cls{k}={v} ({100*v/total:.1f}%)" for k, v in counts.items())
+    logger.info("    class balance [%s]: %s", label, parts)
+    for cls, cnt in counts.items():
+        if cnt / total < 0.05:
+            logger.warning(
+                "    class balance [%s]: class %s has only %.1f%% of samples — "
+                "imbalance may cause unstable CV scores",
+                label, cls, 100 * cnt / total,
+            )
 
 
 def _grid_size(grid):

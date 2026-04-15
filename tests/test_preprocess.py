@@ -408,9 +408,8 @@ def _sample_column_transform_spec():
             "Occupation": {
                 "action": "keep",
                 "semantic_role": "unordered_categorical",
-                "encoding": "one_hot",
                 "imputation": "mode",
-                "representation_intent": "one_hot",
+                "representation_intent": "deferred",
             },
         }
     }
@@ -816,3 +815,81 @@ def test_escalation_caller_on_repeated_violation(monkeypatch):
     )
     assert captured["caller"] == "repair-preprocessing-code-escalated"
     assert "escalation_notice" in captured["payload"]
+
+
+def test_validate_semantic_roles_deferred_column_stays_as_string():
+    """Deferred unordered_categorical must remain object-dtype in feature_frame — no violation."""
+    feature_frame = pd.DataFrame({
+        "Occupation": ["Engineer", "Doctor", "Engineer"],  # object dtype, deferred
+        "Age": [25, 30, 35],
+    })
+    spec = {
+        "transforms": {
+            "Occupation": {
+                "semantic_role": "unordered_categorical",
+                "action": "keep",
+                "representation_intent": "deferred",
+            },
+            "Age": {
+                "semantic_role": "numeric_continuous",
+                "action": "keep",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    deferred_violations = [v for v in violations if v["column"] == "Occupation"]
+    assert deferred_violations == [], (
+        f"Deferred column should have no violations, got: {deferred_violations}"
+    )
+
+
+def test_validate_semantic_roles_rejects_deferred_column_that_was_encoded():
+    """If preprocessing encoded a deferred column to numeric, that is a violation."""
+    feature_frame = pd.DataFrame({
+        "Occupation": [0.1, 0.3, 0.1],  # frequency-encoded — wrong for deferred
+        "Age": [25, 30, 35],
+    })
+    spec = {
+        "transforms": {
+            "Occupation": {
+                "semantic_role": "unordered_categorical",
+                "action": "keep",
+                "representation_intent": "deferred",
+            },
+            "Age": {
+                "semantic_role": "numeric_continuous",
+                "action": "keep",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    occ_violations = [v for v in violations if v["column"] == "Occupation"]
+    assert any(v["violation"] == "deferred_column_encoded_prematurely" for v in occ_violations), (
+        f"Expected 'deferred_column_encoded_prematurely' violation, got: {occ_violations}"
+    )
+
+
+def test_validate_semantic_roles_rejects_non_deferred_string_column():
+    """Non-deferred unordered_categorical must be encoded — object dtype is a violation."""
+    feature_frame = pd.DataFrame({
+        "Occupation": ["Engineer", "Doctor", "Engineer"],  # object dtype, but intent=one_hot
+        "Age": [25, 30, 35],
+    })
+    spec = {
+        "transforms": {
+            "Occupation": {
+                "semantic_role": "unordered_categorical",
+                "action": "keep",
+                "representation_intent": "one_hot",
+            },
+            "Age": {
+                "semantic_role": "numeric_continuous",
+                "action": "keep",
+            },
+        }
+    }
+    violations = validate_semantic_roles(feature_frame, spec)
+    occ_violations = [v for v in violations if v["column"] == "Occupation"]
+    assert any(v["violation"] == "unordered_categorical_not_encoded" for v in occ_violations), (
+        f"Expected 'unordered_categorical_not_encoded' violation, got: {occ_violations}"
+    )

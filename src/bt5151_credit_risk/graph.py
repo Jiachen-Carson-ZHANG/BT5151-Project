@@ -10,7 +10,12 @@ logger = logging.getLogger(__name__)
 from bt5151_credit_risk.business import explain_risk, recommend_action
 from bt5151_credit_risk.eda import build_eda_report
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics, reason_model_selection
-from bt5151_credit_risk.hypotheses import generate_eda_hypotheses, generate_training_diagnostics, interpret_xai_evidence
+from bt5151_credit_risk.hypotheses import (
+    generate_eda_hypotheses,
+    generate_training_diagnostics,
+    interpret_global_xai,
+    interpret_local_xai,
+)
 from bt5151_credit_risk.xai import (
     compute_global_shap,
     compute_permutation_importance,
@@ -1062,20 +1067,18 @@ def local_xai_node(state: CreditRiskState):
     return {"local_xai_cases": cases}
 
 
-# LLM interprets global + local XAI evidence into observations, insights, hypotheses.
-def interpret_xai_node(state: CreditRiskState):
-    logger.info(">>> interpret-xai-evidence")
+# LLM interprets GLOBAL XAI evidence (SHAP/PFI/PDP/ALE) — model-level patterns only.
+def interpret_global_xai_node(state: CreditRiskState):
+    logger.info(">>> interpret-global-xai")
 
-    interpretation = interpret_xai_evidence(
+    interpretation = interpret_global_xai(
         global_xai_results=state.global_xai_results or {},
-        local_xai_cases=state.local_xai_cases or [],
         class_names=state.class_names,
         training_diagnostics=state.training_diagnostics,
         eda_hypotheses=state.eda_hypotheses,
         feature_engineering_hypothesis=state.feature_engineering_hypothesis,
     )
 
-    # Log key outputs
     for obs in (interpretation.get("observations") or [])[:3]:
         logger.info("    observation: %s", obs[:120])
     for ins in (interpretation.get("insights") or [])[:2]:
@@ -1085,18 +1088,45 @@ def interpret_xai_node(state: CreditRiskState):
     if consensus.get("agreement"):
         logger.info("    SHAP/PFI agreement: %s", consensus["agreement"])
     if consensus.get("interpretation"):
-        logger.info("    consensus interpretation: %s", consensus["interpretation"][:120])
-
-    casebook = interpretation.get("casebook_analysis", {})
-    if casebook.get("worst_misclassification_pattern"):
-        logger.info("    worst misclass pattern: %s", casebook["worst_misclassification_pattern"][:120])
+        logger.info("    consensus: %s", consensus["interpretation"][:140])
 
     hyps = interpretation.get("hypotheses", {})
     for tier in ("tested_predictions", "supported_conjectures", "exploratory_leads"):
         for h in (hyps.get(tier) or []):
-            logger.info("    [%s] %s", tier.split("_")[0], h.get("hypothesis", "")[:120])
+            logger.info("    global [%s] %s", tier.split("_")[0], h.get("hypothesis", "")[:120])
 
-    return {"xai_interpretation": interpretation}
+    return {"global_xai_interpretation": interpretation}
+
+
+# LLM interprets LOCAL casebook — per-class stories, boundary analysis, case-grounded hypotheses.
+def interpret_local_xai_node(state: CreditRiskState):
+    logger.info(">>> interpret-local-xai")
+
+    interpretation = interpret_local_xai(
+        local_xai_cases=state.local_xai_cases or [],
+        class_names=state.class_names,
+        global_xai_interpretation=state.global_xai_interpretation,
+        global_xai_results=state.global_xai_results,
+        training_diagnostics=state.training_diagnostics,
+    )
+
+    stories = interpretation.get("per_class_stories", {}) or {}
+    for cls, story in stories.items():
+        if story.get("worst_misclassification_story"):
+            logger.info("    [%s] worst: %s", cls, story["worst_misclassification_story"][:140])
+    patterns = interpretation.get("confusion_patterns", {}) or {}
+    if patterns.get("dominant_direction"):
+        logger.info("    confusion direction: %s", patterns["dominant_direction"][:140])
+    boundary = interpretation.get("decision_boundary_analysis", {}) or {}
+    if boundary.get("thinnest_boundary"):
+        logger.info("    thinnest boundary: %s", boundary["thinnest_boundary"][:140])
+
+    hyps = interpretation.get("hypotheses", {})
+    for tier in ("tested_predictions", "supported_conjectures", "exploratory_leads"):
+        for h in (hyps.get(tier) or []):
+            logger.info("    local [%s] %s", tier.split("_")[0], h.get("hypothesis", "")[:120])
+
+    return {"local_xai_interpretation": interpretation}
 
 
 # Package all analytical outputs into a serializable analysis bundle.
@@ -1105,6 +1135,9 @@ def package_analysis_bundle_node(state: CreditRiskState):
     import hashlib
     from datetime import datetime, timezone
 
+    # The semantic bundle: every LLM-authored interpretation and every hypothesis
+    # passes through verbatim. No [:5]/[:3] truncation — explain-risk is the consumer
+    # that decides what to surface to the customer and should see the full evidence.
     bundle = {
         "metadata": {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -1116,52 +1149,40 @@ def package_analysis_bundle_node(state: CreditRiskState):
         },
         "eda_hypotheses": state.eda_hypotheses,
         "training_diagnostics": state.training_diagnostics,
-        "global_xai": state.global_xai_results,
+        "global_xai_interpretation": state.global_xai_interpretation,
+        "local_xai_interpretation": state.local_xai_interpretation,
         "local_casebook": state.local_xai_cases,
-        "xai_interpretation": state.xai_interpretation,
+        "feature_engineering_hypothesis": state.feature_engineering_hypothesis,
+        "selection_justification": state.selection_justification,
     }
 
-    # Save to disk alongside the experiment (timestamped to preserve cross-run history)
+    # Separate artifact for raw numeric arrays — kept out of the semantic bundle
+    # so explain-risk isn't drowned in beeswarm matrices.
+    numeric_artifacts = {}
+    if state.global_xai_results:
+        shap_block = state.global_xai_results.get("shap") or {}
+        numeric_artifacts["shap_importance"] = shap_block.get("importance")
+        numeric_artifacts["shap_dependence_features"] = list((shap_block.get("dependence_data") or {}).keys())
+        numeric_artifacts["pfi"] = state.global_xai_results.get("pfi")
+        numeric_artifacts["pdp"] = state.global_xai_results.get("pdp")
+        numeric_artifacts["ale"] = state.global_xai_results.get("ale")
+        numeric_artifacts["methods_used"] = state.global_xai_results.get("methods_used", [])
+
+    # Save both to disk (timestamped) for cross-run comparison.
     run_root = Path(state.raw_dataset_path).resolve().parent
     timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    full_on_disk = dict(bundle)
+    full_on_disk["numeric_artifacts"] = numeric_artifacts
     bundle_path = run_root / f"analysis_bundle_{timestamp_str}.json"
-    bundle_path.write_text(json.dumps(bundle, indent=2, default=str), encoding="utf-8")
+    bundle_path.write_text(json.dumps(full_on_disk, indent=2, default=str), encoding="utf-8")
     logger.info("    analysis bundle saved to %s", bundle_path)
 
-    # Build compact summary for explain-risk (no PDP grids, no beeswarm arrays)
-    summary = {
-        "selected_model": state.selected_model_name,
-        "class_names": state.class_names,
-    }
-    if state.eda_hypotheses:
-        summary["eda_model_prediction"] = state.eda_hypotheses.get("model_selection_prediction")
-        summary["eda_class_struggle"] = state.eda_hypotheses.get("class_struggle_prediction")
-        summary["eda_tested_count"] = len(state.eda_hypotheses.get("tested_predictions", []))
-    if state.training_diagnostics:
-        summary["capacity_analysis"] = state.training_diagnostics.get("capacity_analysis")
-        summary["hypothesis_validation"] = state.training_diagnostics.get("hypothesis_validation")
-        summary["per_class_analysis"] = state.training_diagnostics.get("per_class_analysis")
-    if state.global_xai_results:
-        summary["xai_methods_used"] = state.global_xai_results.get("methods_used", [])
-        pfi_grouped = state.global_xai_results.get("pfi", {}).get("grouped", [])
-        summary["pfi_top5"] = pfi_grouped[:5] if pfi_grouped else []
-    if state.local_xai_cases:
-        summary["casebook_count"] = len(state.local_xai_cases)
-        summary["casebook_summary"] = [
-            {"case_type": c["case_type"], "true": c["true_label"], "pred": c["predicted_label"]}
-            for c in state.local_xai_cases
-        ]
-    if state.xai_interpretation:
-        summary["xai_observations"] = (state.xai_interpretation.get("observations") or [])[:5]
-        summary["xai_insights"] = (state.xai_interpretation.get("insights") or [])[:3]
-        summary["xai_consensus"] = state.xai_interpretation.get("feature_importance_consensus")
-        summary["xai_casebook_analysis"] = state.xai_interpretation.get("casebook_analysis")
-        summary["xai_hypotheses"] = state.xai_interpretation.get("hypotheses")
-
-    logger.info("    bundle summary keys: %s", list(summary.keys()))
+    logger.info("    bundle keys: %s", list(bundle.keys()))
     return {
         "analysis_bundle": bundle,
-        "analysis_bundle_summary": summary,
+        # Back-compat: explain-risk reads this field. Now it IS the full semantic bundle,
+        # not a programmatic compression.
+        "analysis_bundle_summary": bundle,
     }
 
 
@@ -1313,7 +1334,8 @@ def build_graph():
     graph.add_node("select-model", select_model_node)
     graph.add_node("global-xai", global_xai_node)
     graph.add_node("local-xai", local_xai_node)
-    graph.add_node("interpret-xai-evidence", interpret_xai_node)
+    graph.add_node("interpret-global-xai", interpret_global_xai_node)
+    graph.add_node("interpret-local-xai", interpret_local_xai_node)
     graph.add_node("package-analysis-bundle", package_analysis_bundle_node)
     graph.add_node("run-inference", run_inference_node)
     graph.add_node("explain-risk", explain_risk_node)
@@ -1368,8 +1390,9 @@ def build_graph():
     graph.add_edge("training-diagnostics", "select-model")
     graph.add_edge("select-model", "global-xai")
     graph.add_edge("global-xai", "local-xai")
-    graph.add_edge("local-xai", "interpret-xai-evidence")
-    graph.add_edge("interpret-xai-evidence", "package-analysis-bundle")
+    graph.add_edge("local-xai", "interpret-global-xai")
+    graph.add_edge("interpret-global-xai", "interpret-local-xai")
+    graph.add_edge("interpret-local-xai", "package-analysis-bundle")
     graph.add_edge("package-analysis-bundle", "run-inference")
     graph.add_edge("run-inference", "explain-risk")
     graph.add_edge("explain-risk", "recommend-action")

@@ -120,7 +120,8 @@ def test_graph_contains_required_nodes():
         "select-model",
         "global-xai",
         "local-xai",
-        "interpret-xai-evidence",
+        "interpret-global-xai",
+        "interpret-local-xai",
         "package-analysis-bundle",
         "run-inference",
         "explain-risk",
@@ -343,14 +344,23 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
              "confused_with_class": None},
         ]
 
-    def fake_interpret_xai_evidence(**kwargs):
-        call_sequence.append("interpret-xai-evidence")
+    def fake_interpret_global_xai(**kwargs):
+        call_sequence.append("interpret-global-xai")
         return {
-            "observations": ["Fake observation"],
-            "insights": ["Fake insight"],
+            "observations": ["Fake global observation"],
+            "insights": ["Fake global insight"],
             "feature_importance_consensus": {"agreement": [], "interpretation": "Synthetic"},
-            "casebook_analysis": {},
             "cross_layer_validation": {},
+            "hypotheses": {"tested_predictions": [], "supported_conjectures": [], "exploratory_leads": []},
+        }
+
+    def fake_interpret_local_xai(**kwargs):
+        call_sequence.append("interpret-local-xai")
+        return {
+            "per_class_stories": {"Good": {"representative_profile": "fake", "borderline_story": "fake", "worst_misclassification_story": "fake"}},
+            "confusion_patterns": {"dominant_direction": "fake"},
+            "global_vs_local_consistency": {},
+            "decision_boundary_analysis": {"thinnest_boundary": "fake"},
             "hypotheses": {"tested_predictions": [], "supported_conjectures": [], "exploratory_leads": []},
         }
 
@@ -369,7 +379,8 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     monkeypatch.setattr(graph_module, "compute_ale", fake_compute_ale)
     monkeypatch.setattr(graph_module, "compute_shap_contributions_for_case", fake_compute_shap_contributions_for_case)
     monkeypatch.setattr(graph_module, "select_classification_cases", fake_select_classification_cases)
-    monkeypatch.setattr(graph_module, "interpret_xai_evidence", fake_interpret_xai_evidence)
+    monkeypatch.setattr(graph_module, "interpret_global_xai", fake_interpret_global_xai)
+    monkeypatch.setattr(graph_module, "interpret_local_xai", fake_interpret_local_xai)
 
     graph = compile_graph()
     result = graph.invoke(

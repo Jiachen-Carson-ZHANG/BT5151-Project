@@ -67,7 +67,8 @@ def test_state_has_expected_keys():
     assert state.model_view_map is None
     assert state.global_xai_results is None
     assert state.local_xai_cases is None
-    assert state.xai_interpretation is None
+    assert state.global_xai_interpretation is None
+    assert state.local_xai_interpretation is None
     assert state.analysis_bundle is None
     assert state.analysis_bundle_summary is None
 

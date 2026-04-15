@@ -43,6 +43,7 @@ Think through these checks on the **feature frame**:
    - Were columns marked `action: "drop"` actually absent from the feature frame?
    - Were columns marked for one_hot actually one-hot encoded?
    - Were multi-value columns properly split before encoding (individual values as separate binary columns, not one dummy per unique combination)?
+   - Were columns marked `representation_intent: "deferred"` left as object-dtype strings? **This is correct — do NOT flag them as non-compliant or "unencoded". A deferred column appearing as a string in the feature frame is spec-compliant by design.**
 3. **Information loss.** Did any cleaning step destroy too much information? Check the feature_stats: if a column that should be numeric has very low nunique or all identical values, parsing may have failed. If a structured string column (like durations) was converted to a number, check whether the full precision was preserved.
 4. **Encoding quality.** Check for:
    - Cardinality explosion (>100 one-hot columns from a single original column).

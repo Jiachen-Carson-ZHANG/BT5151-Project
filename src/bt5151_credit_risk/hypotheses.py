@@ -16,55 +16,73 @@ def generate_eda_hypotheses(eda_report: dict, dataset_profile: dict) -> dict:
     return call_json_response(system_prompt, payload, caller="generate-eda-hypotheses")
 
 
-def interpret_xai_evidence(
+def _strip_beeswarm(global_xai_results: dict) -> dict:
+    """Strip only the raw beeswarm SHAP value arrays (~5k×37 numbers) — everything
+    else is semantic/small and passes through verbatim so the LLM sees full evidence."""
+    if not global_xai_results:
+        return {}
+    out = dict(global_xai_results)
+    shap = out.get("shap")
+    if isinstance(shap, dict) and "beeswarm_data" in shap:
+        shap = dict(shap)
+        shap["beeswarm_feature_names"] = list(shap.get("beeswarm_data", {}).keys())
+        shap.pop("beeswarm_data", None)
+        out["shap"] = shap
+    return out
+
+
+def interpret_global_xai(
     global_xai_results: dict,
-    local_xai_cases: list[dict],
     class_names: list[str],
     training_diagnostics: dict | None = None,
     eda_hypotheses: dict | None = None,
     feature_engineering_hypothesis: dict | None = None,
 ) -> dict:
-    """LLM interprets global + local XAI results into observations, insights, hypotheses."""
-    system_prompt = load_skill_prompt("interpret-xai-evidence")
+    """LLM interprets global XAI (SHAP/PFI/PDP/ALE) into consensus + insights + hypotheses."""
+    system_prompt = load_skill_prompt("interpret-global-xai")
     payload = {
-        "global_xai_results": _compact_xai_for_llm(global_xai_results),
-        "local_xai_cases": local_xai_cases,
+        "global_xai_results": _strip_beeswarm(global_xai_results),
         "class_names": class_names,
     }
     if training_diagnostics:
-        payload["training_diagnostics"] = {
-            k: training_diagnostics[k]
-            for k in ("per_class_analysis", "capacity_analysis", "new_hypotheses")
-            if k in training_diagnostics
-        }
+        payload["training_diagnostics"] = training_diagnostics
     if eda_hypotheses:
-        payload["eda_hypotheses"] = {
-            k: eda_hypotheses[k]
-            for k in ("tested_predictions", "supported_conjectures", "model_selection_prediction")
-            if k in eda_hypotheses
-        }
+        payload["eda_hypotheses"] = eda_hypotheses
     if feature_engineering_hypothesis:
         payload["feature_engineering_hypothesis"] = feature_engineering_hypothesis
-    return call_json_response(system_prompt, payload, caller="interpret-xai-evidence")
+    return call_json_response(system_prompt, payload, caller="interpret-global-xai")
 
 
-def _compact_xai_for_llm(xai_results: dict) -> dict:
-    """Strip large arrays (beeswarm, raw PFI) from XAI results to fit LLM context."""
-    compact = {"methods_used": xai_results.get("methods_used", [])}
-    if "shap" in xai_results:
-        compact["shap_importance"] = xai_results["shap"].get("importance", [])[:15]
-        # Include dependence summary but not full beeswarm arrays
-        dep = xai_results["shap"].get("dependence_data", {})
-        if dep:
-            compact["shap_dependence_features"] = list(dep.keys())
-    if "pfi" in xai_results:
-        compact["pfi_grouped"] = xai_results["pfi"].get("grouped", [])[:15]
-    if "pdp" in xai_results:
-        # Send grid + values for each feature (already small)
-        compact["pdp"] = xai_results["pdp"]
-    if "ale" in xai_results:
-        compact["ale"] = xai_results["ale"]
-    return compact
+def interpret_local_xai(
+    local_xai_cases: list[dict],
+    class_names: list[str],
+    global_xai_interpretation: dict | None = None,
+    global_xai_results: dict | None = None,
+    training_diagnostics: dict | None = None,
+) -> dict:
+    """LLM interprets the casebook (representative / borderline / misclassification per class)
+    into per-class stories, boundary analysis, and fresh hypotheses that cite specific cases."""
+    system_prompt = load_skill_prompt("interpret-local-xai")
+    payload = {
+        "local_xai_cases": local_xai_cases,
+        "class_names": class_names,
+    }
+    if global_xai_interpretation:
+        payload["global_xai_interpretation"] = global_xai_interpretation
+    if global_xai_results:
+        # Pass a thin reference — top SHAP/PFI rankings — so local reasoning can cite globals.
+        thin = {}
+        shap_imp = (global_xai_results.get("shap") or {}).get("importance")
+        if shap_imp:
+            thin["shap_top"] = shap_imp[:10]
+        pfi_grp = (global_xai_results.get("pfi") or {}).get("grouped")
+        if pfi_grp:
+            thin["pfi_grouped_top"] = pfi_grp[:10]
+        if thin:
+            payload["global_xai_reference"] = thin
+    if training_diagnostics:
+        payload["training_diagnostics"] = training_diagnostics
+    return call_json_response(system_prompt, payload, caller="interpret-local-xai")
 
 
 def generate_training_diagnostics(

@@ -185,6 +185,15 @@ def compute_permutation_importance(
         test_frame = test_frame.iloc[sample_positions].copy()
         test_target = test_target.iloc[sample_positions].copy()
 
+    # Bool columns mixed with float/int get promoted to object dtype when sklearn or our
+    # grouped PFI path calls .values / np.asarray. Cast booleans up-front to keep the
+    # frame numerically homogeneous so XGBoost's predict() accepts it.
+    bool_cols = [c for c in test_frame.columns if test_frame[c].dtype == bool]
+    if bool_cols:
+        test_frame = test_frame.copy()
+        for c in bool_cols:
+            test_frame[c] = test_frame[c].astype("int8")
+
     result = permutation_importance(
         model, test_frame, test_target,
         n_repeats=n_repeats, scoring="f1_macro", random_state=42, n_jobs=-1,

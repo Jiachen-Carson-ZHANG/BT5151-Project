@@ -572,16 +572,49 @@ def validate_semantic_roles(
                             )
 
             elif role == "unordered_categorical":
-                if intent == "one_hot" and m != col and numeric:
-                    if not _is_binary_set(uniq):
-                        bad = sorted([v for v in uniq if float(v) not in (0.0, 1.0)])[:5]
+                if intent == "deferred":
+                    # Deferred columns must remain as object-dtype strings in the
+                    # canonical base frame.  FE encodes them per model view.
+                    if m == col and numeric:
                         record(
                             column=m, role=role,
-                            violation="one_hot_not_binary",
-                            observed=f"values include {bad}",
-                            expected="values ⊆ {0, 1}",
-                            likely_cause="one-hot indicator is not binary; duplicate categories may have been summed. Strip category labels and deduplicate before pivoting.",
+                            violation="deferred_column_encoded_prematurely",
+                            observed=f"dtype={series.dtype} (numeric)",
+                            expected="object dtype (string) — deferred encoding must be applied by FE, not preprocessing",
+                            likely_cause=(
+                                "The column-transform-spec marked this column "
+                                "representation_intent='deferred' but the preprocessing code "
+                                "encoded it anyway. Remove the encoding step for deferred columns — "
+                                "they must reach the FE node as cleaned string columns."
+                            ),
                         )
+                else:
+                    # Non-deferred: base column must be gone (replaced by encoded form).
+                    if m == col and not numeric:
+                        record(
+                            column=m, role=role,
+                            violation="unordered_categorical_not_encoded",
+                            observed=f"dtype=object (raw string)",
+                            expected=f"encoded as numeric per intent='{intent}'",
+                            likely_cause=(
+                                f"unordered_categorical with intent='{intent}' must be encoded "
+                                "to numeric before saving feature_frame.csv. "
+                                "For one_hot: use str.get_dummies and drop the original. "
+                                "For frequency_encoded: replace with frequency counts. "
+                                "Only intent='deferred' may remain as object dtype."
+                            ),
+                        )
+                    # Check one-hot dummies are binary.
+                    if intent == "one_hot" and m != col and numeric:
+                        if not _is_binary_set(uniq):
+                            bad = sorted([v for v in uniq if float(v) not in (0.0, 1.0)])[:5]
+                            record(
+                                column=m, role=role,
+                                violation="one_hot_not_binary",
+                                observed=f"values include {bad}",
+                                expected="values ⊆ {0, 1}",
+                                likely_cause="one-hot indicator is not binary; duplicate categories may have been summed. Strip category labels and deduplicate before pivoting.",
+                            )
 
             elif role == "numeric_count":
                 if numeric and (series.dropna() < 0).any():
