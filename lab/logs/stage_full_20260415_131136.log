@@ -1,0 +1,4 @@
+13:11:36 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/logs/stage_full_20260415_131136.log
+13:11:41 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===
+13:11:41 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+13:11:42 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns

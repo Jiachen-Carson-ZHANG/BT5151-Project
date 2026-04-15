@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from bt5151_credit_risk.llm import get_usage_summary, reset_usage_log
 
-LOG_DIR = Path(__file__).resolve().parent / "logs"
+LOG_DIR = Path(__file__).resolve().parent / "lab" / "logs"
 
 # Each stage stops the graph after this node completes.
 # For loop stages, we stop at the first node AFTER the loop converges,

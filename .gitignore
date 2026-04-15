@@ -16,6 +16,7 @@ credit_score_model_ready.csv
 credit_score_model_ready.xlsx
 generated_preprocessing_runs/
 feature_engineering_runs/
+logs/
 
 # Local tool configs
 .codex
