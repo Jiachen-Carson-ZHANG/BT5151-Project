@@ -7,6 +7,7 @@ __pycache__/
 *.pyc
 .claude/
 AGENTS.md
+AGENT.md
 docs/
 
 train.csv
@@ -16,7 +17,7 @@ credit_score_model_ready.csv
 credit_score_model_ready.xlsx
 generated_preprocessing_runs/
 feature_engineering_runs/
-logs/
+/logs/
 
 # Local tool configs
 .codex

@@ -1173,7 +1173,10 @@ def package_analysis_bundle_node(state: CreditRiskState):
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     full_on_disk = dict(bundle)
     full_on_disk["numeric_artifacts"] = numeric_artifacts
-    bundle_path = run_root / f"analysis_bundle_{timestamp_str}.json"
+    # Save alongside run logs in lab/logs/ so all run artifacts are co-located.
+    log_dir = run_root / "lab" / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    bundle_path = log_dir / f"analysis_bundle_{timestamp_str}.json"
     bundle_path.write_text(json.dumps(full_on_disk, indent=2, default=str), encoding="utf-8")
     logger.info("    analysis bundle saved to %s", bundle_path)
 
