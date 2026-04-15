@@ -577,6 +577,7 @@ def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_
 
     execution_log = result["execution_log"]
     assert execution_log["returncode"] == 0
+    assert execution_log["timeout_seconds"] == 180
     assert "stdout" in execution_log
     assert "stderr" in execution_log
 

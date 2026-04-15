@@ -308,11 +308,11 @@ def validate_feature_engineering_output(
                 add_check(f"{view_name}_no_nans_in_train", train_nans == 0, f"{train_artifact} has {train_nans} NaN values.")
                 train_infs = int(np.isinf(train_df.select_dtypes(include="number")).sum().sum())
                 add_check(f"{view_name}_no_infs_in_train", train_infs == 0, f"{train_artifact} has {train_infs} inf values.")
-                train_non_numeric = list(train_df.select_dtypes(exclude="number").columns)
+                train_non_numeric = list(train_df.select_dtypes(exclude=["number", "bool"]).columns)
                 add_check(
                     f"{view_name}_train_fully_numeric",
                     not train_non_numeric,
-                    f"{train_artifact} has non-numeric columns {train_non_numeric[:10]} — FE must encode deferred categoricals per view.",
+                    f"{train_artifact} has non-numeric/non-bool columns {train_non_numeric[:10]} — FE must encode deferred categoricals per view.",
                 )
                 add_check(
                     f"{view_name}_features_non_empty",
@@ -331,11 +331,11 @@ def validate_feature_engineering_output(
                 add_check(f"{view_name}_no_nans_in_test", test_nans == 0, f"{test_artifact} has {test_nans} NaN values.")
                 test_infs = int(np.isinf(test_df.select_dtypes(include="number")).sum().sum())
                 add_check(f"{view_name}_no_infs_in_test", test_infs == 0, f"{test_artifact} has {test_infs} inf values.")
-                test_non_numeric = list(test_df.select_dtypes(exclude="number").columns)
+                test_non_numeric = list(test_df.select_dtypes(exclude=["number", "bool"]).columns)
                 add_check(
                     f"{view_name}_test_fully_numeric",
                     not test_non_numeric,
-                    f"{test_artifact} has non-numeric columns {test_non_numeric[:10]} — FE must encode deferred categoricals per view.",
+                    f"{test_artifact} has non-numeric/non-bool columns {test_non_numeric[:10]} — FE must encode deferred categoricals per view.",
                 )
 
             if train_df is not None and test_df is not None:
@@ -390,11 +390,11 @@ def validate_feature_engineering_output(
             add_check("no_nans_in_train", train_nans == 0, f"engineered_train.csv has {train_nans} NaN values.")
             train_infs = int(np.isinf(train_df.select_dtypes(include="number")).sum().sum())
             add_check("no_infs_in_train", train_infs == 0, f"engineered_train.csv has {train_infs} inf values.")
-            train_non_numeric = list(train_df.select_dtypes(exclude="number").columns)
+            train_non_numeric = list(train_df.select_dtypes(exclude=["number", "bool"]).columns)
             add_check(
                 "train_fully_numeric",
                 not train_non_numeric,
-                f"engineered_train.csv has non-numeric columns {train_non_numeric[:10]} — FE must encode deferred categoricals.",
+                f"engineered_train.csv has non-numeric/non-bool columns {train_non_numeric[:10]} — FE must encode deferred categoricals.",
             )
             add_check(
                 "features_non_empty",
@@ -413,11 +413,11 @@ def validate_feature_engineering_output(
             add_check("no_nans_in_test", test_nans == 0, f"engineered_test.csv has {test_nans} NaN values.")
             test_infs = int(np.isinf(test_df.select_dtypes(include="number")).sum().sum())
             add_check("no_infs_in_test", test_infs == 0, f"engineered_test.csv has {test_infs} inf values.")
-            test_non_numeric = list(test_df.select_dtypes(exclude="number").columns)
+            test_non_numeric = list(test_df.select_dtypes(exclude=["number", "bool"]).columns)
             add_check(
                 "test_fully_numeric",
                 not test_non_numeric,
-                f"engineered_test.csv has non-numeric columns {test_non_numeric[:10]} — FE must encode deferred categoricals.",
+                f"engineered_test.csv has non-numeric/non-bool columns {test_non_numeric[:10]} — FE must encode deferred categoricals.",
             )
 
         if train_df is not None and test_df is not None:

@@ -315,7 +315,7 @@ def execute_generated_preprocessing(
         encoding="utf-8",
     )
 
-    timeout_seconds = 120
+    timeout_seconds = 180
     try:
         completed = subprocess.run(
             [sys.executable, str(runner_path), str(code_path), str(raw_frame_path), str(workspace_path)],

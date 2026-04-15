@@ -152,7 +152,8 @@ def test_deferred_encoding_contract_across_three_skills():
     assert "target encoding" in fe_prompt.lower()
     assert "out-of-fold" in fe_prompt
     assert "Never use raw label encoding" in fe_prompt
-    assert "select_dtypes(exclude='number').empty" in fe_prompt
+    assert "select_dtypes(exclude=['number', 'bool']).empty" in fe_prompt
+    assert "Boolean one-hot / multi-hot columns are valid outputs" in fe_prompt
     # Input contract wording relaxed
     assert "may arrive already encoded" in fe_prompt
     assert "deferred as cleaned string columns" in fe_prompt

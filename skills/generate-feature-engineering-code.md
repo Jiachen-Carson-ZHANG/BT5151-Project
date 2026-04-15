@@ -71,15 +71,15 @@ These are non-negotiable correctness rules. They protect against bugs, not again
    - **Medium cardinality (13–50):** one-hot for `linear_view`; **frequency encoding** for `tree_view` (`train_freq = train[col].map(train[col].value_counts(normalize=True)); test[col] = test[col].map(train_freq_dict).fillna(0.0)`). Frequency encoding is monotone in prevalence, compact, and avoids the fake ordering that raw label encoding injects.
    - **High cardinality (> 50):** frequency encoding for both views by default; **target encoding** is acceptable when it clearly helps, but must use out-of-fold means on train (e.g. 5-fold mean computed from held-out folds) and apply the full-train mean to test — never compute target means on rows that will be predicted.
    - **Never use raw label encoding (`factorize` / arbitrary integer codes) as the default for unordered categories.** It injects lexicographic order that trees will split on for the wrong reason. Only acceptable as a last-resort fallback with an explicit justification in the hypothesis field.
-   - Before writing each view's CSV, assert both frames are fully numeric:
+   - Before writing each view's CSV, assert both frames are fully numeric, allowing boolean dummy columns but rejecting any remaining string/category/object columns:
      ```python
-     assert linear_train.select_dtypes(exclude='number').empty, \
-         f"linear_view train has non-numeric columns: {list(linear_train.select_dtypes(exclude='number').columns)}"
-     assert tree_train.select_dtypes(exclude='number').empty, \
-         f"tree_view train has non-numeric columns: {list(tree_train.select_dtypes(exclude='number').columns)}"
+     assert linear_train.select_dtypes(exclude=['number', 'bool']).empty, \
+         f"linear_view train has non-numeric/non-bool columns: {list(linear_train.select_dtypes(exclude=['number', 'bool']).columns)}"
+     assert tree_train.select_dtypes(exclude=['number', 'bool']).empty, \
+         f"tree_view train has non-numeric/non-bool columns: {list(tree_train.select_dtypes(exclude=['number', 'bool']).columns)}"
      # same for test frames
      ```
-   If a view ships a string column, sklearn/XGBoost training will crash — the assertion makes the contract violation visible at FE time, not training time.
+   If a view ships a string/category/object column, sklearn/XGBoost training will crash — the assertion makes the contract violation visible at FE time, not training time. Boolean one-hot / multi-hot columns are valid outputs.
 
 8. **Engineered ratios must be stabilized before they reach the model.** After creating every ratio feature, apply this three-step cleanup to both train and test using train statistics only:
    ```python

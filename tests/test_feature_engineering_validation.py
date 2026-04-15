@@ -88,6 +88,43 @@ def test_dual_view_passes_when_all_views_numeric(tmp_path):
     assert result["checks"]["tree_view_train_fully_numeric"] is True
 
 
+def test_dual_view_accepts_boolean_dummy_columns(tmp_path):
+    view_metadata = {
+        "views": {
+            "linear_view": {
+                "train_artifact": "engineered_train_linear.csv",
+                "test_artifact": "engineered_test_linear.csv",
+            },
+            "tree_view": {
+                "train_artifact": "engineered_train_tree.csv",
+                "test_artifact": "engineered_test_tree.csv",
+            },
+        }
+    }
+    train_df = pd.DataFrame({
+        "age": [25, 30, 40],
+        "occupation_Doctor": [True, False, False],
+        "occupation_Engineer": [False, True, True],
+    })
+    test_df = pd.DataFrame({
+        "age": [35, 45],
+        "occupation_Doctor": [False, True],
+        "occupation_Engineer": [True, False],
+    })
+    artifacts = _write_artifacts(tmp_path, train_df, test_df, view_metadata)
+
+    result = validate_feature_engineering_output(
+        {"artifacts": artifacts, "view_metadata": view_metadata},
+        original_train_rows=3,
+        original_test_rows=2,
+        original_feature_count=3,
+    )
+
+    assert result["passed"] is True, result["errors"]
+    assert result["checks"]["linear_view_train_fully_numeric"] is True
+    assert result["checks"]["tree_view_train_fully_numeric"] is True
+
+
 def test_single_view_rejects_non_numeric_column(tmp_path):
     train_df = pd.DataFrame({"age": [25, 30], "occupation": ["eng", "doc"]})
     test_df = pd.DataFrame({"age": [35, 45], "occupation": ["doc", "eng"]})
@@ -104,3 +141,28 @@ def test_single_view_rejects_non_numeric_column(tmp_path):
     failing = {e["rule"] for e in result["errors"]}
     assert "train_fully_numeric" in failing
     assert "test_fully_numeric" in failing
+
+
+def test_single_view_accepts_boolean_dummy_columns(tmp_path):
+    train_df = pd.DataFrame({
+        "age": [25, 30],
+        "occupation_Doctor": [True, False],
+        "occupation_Engineer": [False, True],
+    })
+    test_df = pd.DataFrame({
+        "age": [35, 45],
+        "occupation_Doctor": [False, True],
+        "occupation_Engineer": [True, False],
+    })
+    artifacts = _write_artifacts(tmp_path, train_df, test_df, view_metadata=None)
+
+    result = validate_feature_engineering_output(
+        {"artifacts": artifacts, "view_metadata": None},
+        original_train_rows=2,
+        original_test_rows=2,
+        original_feature_count=3,
+    )
+
+    assert result["passed"] is True, result["errors"]
+    assert result["checks"]["train_fully_numeric"] is True
+    assert result["checks"]["test_fully_numeric"] is True
