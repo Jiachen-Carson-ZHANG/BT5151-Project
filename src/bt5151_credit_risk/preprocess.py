@@ -302,7 +302,7 @@ def execute_generated_preprocessing(
                 "    entrypoint = getattr(module, entrypoint_name, None)",
                 "    if not callable(entrypoint):",
                 "        raise AttributeError(f\"Generated preprocessing entrypoint '{entrypoint_name}' was not found or is not callable.\")",
-                "    raw_df = pd.read_csv(raw_frame_path)",
+                "    raw_df = pd.read_csv(raw_frame_path, low_memory=False)",
                 "    result = entrypoint(raw_df, workspace_path)",
                 "    if result is not None:",
                 "        print(json.dumps(result, default=str))",
@@ -316,7 +316,7 @@ def execute_generated_preprocessing(
         encoding="utf-8",
     )
 
-    timeout_seconds = 180
+    timeout_seconds = 300
     try:
         completed = subprocess.run(
             [sys.executable, str(runner_path), str(code_path), str(raw_frame_path), str(workspace_path)],
@@ -617,38 +617,56 @@ def validate_semantic_roles(
                                 likely_cause="one-hot indicator is not binary; duplicate categories may have been summed. Strip category labels and deduplicate before pivoting.",
                             )
 
-            elif role == "numeric_count":
-                if numeric and (series.dropna() < 0).any():
+            elif role in {"numeric_count", "numeric_continuous"}:
+                # Dtype gate: numeric roles MUST have numeric dtype. One-sided
+                # `if numeric and ...` would silently skip an Age-as-string column.
+                if not numeric:
                     record(
                         column=m, role=role,
-                        violation="negative_count",
-                        observed=f"min={float(series.min())}",
-                        expected="values >= 0",
-                        likely_cause="count values must be non-negative; clip lower bound to 0 or check parsing (a '-' in the raw string may have been preserved).",
-                    )
-
-            elif role == "numeric_continuous":
-                if numeric and series.isna().any():
-                    record(
-                        column=m, role=role,
-                        violation="has_nan",
-                        observed=f"{int(series.isna().sum())} NaN values",
-                        expected="no NaN (imputation should fill)",
-                        likely_cause="imputation step did not cover this column; verify the imputation branch runs after cleaning.",
-                    )
-                if numeric and np.isinf(series).any():
-                    n_inf = int(np.isinf(series).sum())
-                    record(
-                        column=m, role=role,
-                        violation="has_inf",
-                        observed=f"{n_inf} inf/-inf values",
-                        expected="finite values only (no inf/-inf)",
+                        violation="not_numeric_dtype",
+                        observed=f"dtype={series.dtype}",
+                        expected="numeric dtype (int/float)",
                         likely_cause=(
-                            "a transform produced infinity — common causes: "
-                            "division by zero, log(0), or inverse of near-zero values. "
-                            "Replace inf with np.nan then impute, or clip before the transform."
+                            "column remained non-numeric after cleaning. Verify order: "
+                            "(1) replace garbage tokens with NaN, (2) strip non-numeric "
+                            "artifacts from strings, (3) pd.to_numeric(errors='coerce'), "
+                            "(4) impute. Do not run imputation on an object-dtype series."
                         ),
                     )
+                    continue
+
+                if role == "numeric_count":
+                    if (series.dropna() < 0).any():
+                        record(
+                            column=m, role=role,
+                            violation="negative_count",
+                            observed=f"min={float(series.min())}",
+                            expected="values >= 0",
+                            likely_cause="count values must be non-negative; clip lower bound to 0 or check parsing (a '-' in the raw string may have been preserved).",
+                        )
+
+                else:  # numeric_continuous
+                    if series.isna().any():
+                        record(
+                            column=m, role=role,
+                            violation="has_nan",
+                            observed=f"{int(series.isna().sum())} NaN values",
+                            expected="no NaN (imputation should fill)",
+                            likely_cause="imputation step did not cover this column; verify the imputation branch runs after cleaning.",
+                        )
+                    if np.isinf(series).any():
+                        n_inf = int(np.isinf(series).sum())
+                        record(
+                            column=m, role=role,
+                            violation="has_inf",
+                            observed=f"{n_inf} inf/-inf values",
+                            expected="finite values only (no inf/-inf)",
+                            likely_cause=(
+                                "a transform produced infinity — common causes: "
+                                "division by zero, log(0), or inverse of near-zero values. "
+                                "Replace inf with np.nan then impute, or clip before the transform."
+                            ),
+                        )
 
             elif role == "temporal_feature":
                 # Temporal columns are typically decomposed; if the original string column
@@ -661,6 +679,189 @@ def validate_semantic_roles(
                         expected="decomposed into numeric features (year/month/dow/etc.) per representation_intent",
                         likely_cause="temporal_feature must be parsed with pd.to_datetime and decomposed into numeric components; drop the original string column after decomposition.",
                     )
+
+    return violations
+
+
+# Cross-field semantic invariants that are not captured by per-column role contracts.
+# Each check emits a structured finding using the same shape as validate_semantic_roles.
+# Thresholds are data-aware (relative to raw frame) where a magic-number absolute
+# would be brittle across datasets.
+def validate_semantic_invariants(
+    feature_frame: pd.DataFrame,
+    raw_frame: pd.DataFrame | None,
+    column_transform_spec: dict,
+) -> list[dict]:
+    violations: list[dict] = []
+
+    def record(column, violation, observed, expected, likely_cause):
+        violations.append({
+            "column": column,
+            "declared_role": None,
+            "violation": violation,
+            "observed": observed,
+            "expected": expected,
+            "likely_cause": likely_cause,
+        })
+
+    cols = set(feature_frame.columns)
+
+    if "Age" in cols:
+        age = feature_frame["Age"]
+        if pd.api.types.is_numeric_dtype(age):
+            non_null = age.dropna()
+            if len(non_null):
+                amin = float(non_null.min())
+                amax = float(non_null.max())
+                if amin < 18 or amax > 100:
+                    record(
+                        column="Age",
+                        violation="age_out_of_range",
+                        observed=f"range=[{amin:.1f}, {amax:.1f}]",
+                        expected="18 <= Age <= 100",
+                        likely_cause=(
+                            "Age contains values outside human plausibility. "
+                            "Check parsing (negative signs in strings), clip to [18, 100], "
+                            "or coerce garbage to NaN and impute."
+                        ),
+                    )
+                # Cardinality check is only meaningful on production-sized frames;
+                # skip for tiny (toy / test) frames where nunique is bounded by row count.
+                if len(feature_frame) >= 100 and int(age.nunique()) < 10:
+                    record(
+                        column="Age",
+                        violation="age_low_cardinality",
+                        observed=f"nunique={int(age.nunique())} on {len(feature_frame)} rows",
+                        expected="nunique >= 10",
+                        likely_cause=(
+                            "Age collapsed to a handful of values — likely a failed "
+                            "parse that imputed the same fallback across most rows."
+                        ),
+                    )
+
+    if "Credit_History_Age" in cols:
+        cha = feature_frame["Credit_History_Age"]
+        if pd.api.types.is_numeric_dtype(cha):
+            non_null = cha.dropna()
+            if len(non_null):
+                cmin = float(non_null.min())
+                cmax = float(non_null.max())
+                if cmin < 0 or cmax > 1000:
+                    record(
+                        column="Credit_History_Age",
+                        violation="credit_history_age_out_of_range",
+                        observed=f"range=[{cmin:.1f}, {cmax:.1f}] months",
+                        expected="0 <= months <= 1000",
+                        likely_cause=(
+                            "Credit_History_Age is expected in months. Values outside "
+                            "[0, 1000] suggest unit confusion (years vs months) or "
+                            "bad parsing."
+                        ),
+                    )
+
+                if raw_frame is not None and "Credit_History_Age" in raw_frame.columns:
+                    raw_nunique = int(raw_frame["Credit_History_Age"].dropna().nunique())
+                    out_nunique = int(cha.nunique())
+                    if raw_nunique >= 50:
+                        ratio = out_nunique / raw_nunique if raw_nunique else 1.0
+                        if ratio < 0.3:
+                            record(
+                                column="Credit_History_Age",
+                                violation="credit_history_age_low_cardinality",
+                                observed=f"nunique_out={out_nunique}, nunique_raw={raw_nunique}, ratio={ratio:.2f}",
+                                expected="nunique_out / nunique_raw >= 0.3",
+                                likely_cause=(
+                                    "Output cardinality is a small fraction of raw — "
+                                    "the regex likely captured only the year component "
+                                    "and discarded months."
+                                ),
+                            )
+
+                non_year_mult = int(((non_null.astype(float) % 12) != 0).sum())
+                frac_non_year = non_year_mult / len(non_null)
+                if frac_non_year < 0.05:
+                    record(
+                        column="Credit_History_Age",
+                        violation="credit_history_age_year_only",
+                        observed=f"only {frac_non_year*100:.1f}% of values have months%12!=0",
+                        expected=">= 5% of non-null values should have a non-zero month remainder",
+                        likely_cause=(
+                            "The parser captured years only (every value is a multiple of 12). "
+                            "Use a regex that extracts both year and month, e.g. "
+                            r"r'(\d+)\s*Years?\s*and\s*(\d+)\s*Months?'."
+                        ),
+                    )
+
+                if "Age" in cols and pd.api.types.is_numeric_dtype(feature_frame["Age"]):
+                    paired = pd.concat([feature_frame["Age"], cha], axis=1).dropna()
+                    if len(paired):
+                        max_months = (paired["Age"] - 18).clip(lower=0) * 12 * 1.1
+                        violating = (paired["Credit_History_Age"] > max_months).sum()
+                        frac_violating = violating / len(paired)
+                        if frac_violating > 0.05:
+                            record(
+                                column="Credit_History_Age",
+                                violation="credit_history_age_exceeds_adulthood",
+                                observed=f"{frac_violating*100:.1f}% of rows have CHA > (Age-18)*12*1.1",
+                                expected="<= 5% violating rows",
+                                likely_cause=(
+                                    "Credit_History_Age exceeds the applicant's possible "
+                                    "credit tenure. Likely a unit confusion, or Age was collapsed."
+                                ),
+                            )
+
+    base_cols_with_missing: dict[str, list[str]] = {}
+    for c in feature_frame.columns:
+        if c.endswith("_missing"):
+            base = c[: -len("_missing")]
+            base_cols_with_missing[base] = []
+    for base in base_cols_with_missing:
+        siblings = [
+            c for c in feature_frame.columns
+            if c.startswith(f"{base}_") and c != f"{base}_missing"
+        ]
+        base_cols_with_missing[base] = siblings
+
+    for base, siblings in base_cols_with_missing.items():
+        miss_col = f"{base}_missing"
+        miss_series = feature_frame[miss_col]
+        if not pd.api.types.is_numeric_dtype(miss_series):
+            continue
+        missing_mask = miss_series.fillna(0).astype(float) == 1
+        n_missing = int(missing_mask.sum())
+        if n_missing == 0:
+            continue
+
+        not_specified = [s for s in siblings if s.endswith("_Not Specified") or s.endswith("_Not_Specified")]
+        for ns in not_specified:
+            record(
+                column=ns,
+                violation="duplicate_missingness_encoding",
+                observed=f"'{ns}' exists alongside '{miss_col}'",
+                expected=f"only one representation of missingness — keep '{miss_col}', drop '{ns}'",
+                likely_cause=(
+                    "Missingness is encoded twice: once via the _missing sentinel and once "
+                    "via a 'Not Specified' one-hot column. Drop the one-hot variant."
+                ),
+            )
+
+        for sib in siblings:
+            sib_series = feature_frame[sib]
+            if not pd.api.types.is_numeric_dtype(sib_series):
+                continue
+            collision = ((missing_mask) & (sib_series.fillna(0).astype(float) != 0)).sum()
+            if collision > 0:
+                record(
+                    column=sib,
+                    violation="missing_sentinel_collision",
+                    observed=f"{int(collision)} rows have '{miss_col}'=1 and '{sib}'!=0",
+                    expected=f"when '{miss_col}'=1, all '{base}_*' siblings must be 0",
+                    likely_cause=(
+                        "Missingness and a category indicator are both set on the same row. "
+                        "Zero out sibling indicators when the _missing sentinel fires."
+                    ),
+                )
+                break
 
     return violations
 
@@ -716,7 +917,7 @@ def validate_preprocessing_output(
         try:
             target_df = pd.read_csv(target_path)
             target_series_raw = target_df.iloc[:, 0]
-            raw_frame_check = pd.read_csv(raw_frame_path, usecols=[target_column])
+            raw_frame_check = pd.read_csv(raw_frame_path, usecols=[target_column], low_memory=False)
             original_unique = set(raw_frame_check[target_column].dropna().astype(str).unique())
             saved_unique = set(target_series_raw.dropna().astype(str).unique())
             # If the saved values are all numeric integers and the original values are
@@ -821,7 +1022,7 @@ def validate_preprocessing_output(
                 manifest = json.loads(split_manifest_path.read_text(encoding="utf-8"))
                 train_indices = manifest["train_indices"]
                 test_indices = manifest["test_indices"]
-                raw_frame = pd.read_csv(raw_frame_path)
+                raw_frame = pd.read_csv(raw_frame_path, low_memory=False)
                 train_groups = set(raw_frame.iloc[train_indices][group_column].dropna().tolist())
                 test_groups = set(raw_frame.iloc[test_indices][group_column].dropna().tolist())
                 group_overlap_zero = train_groups.isdisjoint(test_groups)
@@ -913,12 +1114,54 @@ def validate_preprocessing_output(
                 "message": f"semantic role validator raised {type(exc).__name__}: {exc}",
             })
 
+    # --- Cross-field semantic invariants (Age, Credit_History_Age, missingness) ---
+    invariant_violations: list[dict] = []
+    if feature_frame is not None:
+        raw_frame_for_invariants = None
+        if raw_frame_path.is_file():
+            try:
+                raw_frame_for_invariants = pd.read_csv(raw_frame_path, low_memory=False)
+            except Exception:
+                raw_frame_for_invariants = None
+        try:
+            invariant_violations = validate_semantic_invariants(
+                feature_frame, raw_frame_for_invariants, column_transform_spec or {}
+            )
+        except Exception as exc:  # pragma: no cover
+            invariant_violations = []
+            warnings.append({
+                "rule": "semantic_invariant_validator_error",
+                "message": f"semantic invariant validator raised {type(exc).__name__}: {exc}",
+            })
+
+    passed = all(checks.values()) and not errors and not role_violations and not invariant_violations
+
+    # --- Persist preprocessing contract report artifact ---
+    if workspace_path and workspace_path.exists():
+        contract_report = {
+            "workspace": str(workspace_path),
+            "passed": passed,
+            "structural_checks": checks,
+            "errors": errors,
+            "warnings": warnings,
+            "role_violations": role_violations,
+            "cross_field_violations": invariant_violations,
+        }
+        try:
+            (workspace_path / "preprocessing_contract_report.json").write_text(
+                json.dumps(contract_report, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception:  # pragma: no cover - defensive: never crash on artifact write
+            pass
+
     return {
-        "passed": all(checks.values()) and not errors and not role_violations,
+        "passed": passed,
         "checks": checks,
         "errors": errors,
         "warnings": warnings,
         "role_violations": role_violations,
+        "cross_field_violations": invariant_violations,
     }
 
 

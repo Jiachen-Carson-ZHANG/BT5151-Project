@@ -1,0 +1,323 @@
+19:09:21 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/lab/logs/stage_full_20260415_190921.log
+19:09:21 INFO    run_stage  --save-cache enabled: pipeline state will be serialized after run
+19:09:30 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===
+19:09:30 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+19:09:37 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns
+19:09:50 INFO    bt5151_credit_risk.llm  LLM call [dataset-policy-spec] model=gpt-4o input_tokens=4377 output_tokens=191 duration=12.70s
+19:09:50 INFO    bt5151_credit_risk.graph      policy spec keys: ['task_type', 'target_column', 'group_column', 'identifier_columns', 'split_strategy', 'validation_policy', 'leakage_policy', 'imbalance_policy']
+19:09:51 INFO    bt5151_credit_risk.graph      profile: {"row_count": 100000, "target_distribution": {"Standard": 53174, "Poor": 28998, "Good": 17828}}
+19:09:51 INFO    bt5151_credit_risk.graph  >>> exploratory-data-analysis
+19:10:06 INFO    bt5151_credit_risk.graph      top discriminative features (mutual information):
+19:10:06 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: MI=0.5471
+19:10:06 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: MI=0.5187
+19:10:06 INFO    bt5151_credit_risk.graph        Interest_Rate: MI=0.1705
+19:10:06 INFO    bt5151_credit_risk.graph        Delay_from_due_date: MI=0.1215
+19:10:06 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: MI=0.1114
+19:10:06 INFO    bt5151_credit_risk.graph        Num_Credit_Card: MI=0.1048
+19:10:06 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: MI=0.0995
+19:10:06 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: MI=0.0000
+19:10:06 INFO    bt5151_credit_risk.graph      highly skewed columns (|skew| > 2): 5
+19:10:06 INFO    bt5151_credit_risk.graph      high-cardinality categoricals (>20 unique):
+19:10:06 INFO    bt5151_credit_risk.graph        ID: 100000 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Monthly_Balance: 98792 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: 91049 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Annual_Income: 18940 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 13178 unique
+19:10:06 INFO    bt5151_credit_risk.graph        SSN: 12501 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Customer_ID: 12500 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Name: 10139 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Type_of_Loan: 6260 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: 4384 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Age: 1788 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: 749 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Num_of_Loan: 434 unique
+19:10:06 INFO    bt5151_credit_risk.graph        Credit_History_Age: 404 unique
+19:10:06 INFO    bt5151_credit_risk.graph      MNAR suspects (missingness correlates with target): 1
+19:10:06 INFO    bt5151_credit_risk.graph        Type_of_Loan: 11.4% missing, target dist diff=0.1951
+19:10:06 INFO    bt5151_credit_risk.graph      ANOVA top-5 features:
+19:10:06 INFO    bt5151_credit_risk.graph        Delay_from_due_date: F=11471.89 p=0.000000
+19:10:06 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: F=1903.07 p=0.000000
+19:10:06 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: F=105.30 p=0.000000
+19:10:06 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: F=6.26 p=0.001921
+19:10:06 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: F=5.50 p=0.004072
+19:10:06 INFO    bt5151_credit_risk.graph  >>> generate-eda-hypotheses
+19:10:32 INFO    bt5151_credit_risk.llm  LLM call [generate-eda-hypotheses] model=o4-mini input_tokens=3995 output_tokens=3519 duration=25.87s
+19:10:32 INFO    bt5151_credit_risk.graph      tested predictions: 4
+19:10:32 INFO    bt5151_credit_risk.graph        [tested] XGBoost will outperform logistic regression by ≥4 pp macro_f1 at evaluate-models because Total_EMI_per_month (MI=0.5471, F=1.04) provides strong nonli
+19:10:32 INFO    bt5151_credit_risk.graph        [tested] Total_EMI_per_month will rank #1 in global SHAP with mean |SHAP| ≥1.1× that of Monthly_Inhand_Salary at global-xai due to its highest MI=0.5471 vs nex
+19:10:32 INFO    bt5151_credit_risk.graph        [tested] Delay_from_due_date will have the largest absolute coefficient in the LR model (|coef|≥0.8) with p<0.001 in evaluate-models because it has the highest
+19:10:32 INFO    bt5151_credit_risk.graph        [tested] Interest_Rate will appear in the top-5 global SHAP features but have a near-zero LR coefficient (|coef|<0.05) because MI=0.1705 vs F=1.8 indicates non
+19:10:32 INFO    bt5151_credit_risk.graph      supported conjectures: 4
+19:10:32 INFO    bt5151_credit_risk.graph        [supported] Standard class will have the lowest recall (≤0.75) with Standard→Poor as the dominant confusion at evaluate-models because its conditional means on th
+19:10:32 INFO    bt5151_credit_risk.graph        [supported] LR macro_f1 will be within 2 pp of a dummy baseline (≈0.33) because besides Delay_from_due_date (F=11471) and Monthly_Inhand_Salary (F=1903), all othe
+19:10:32 INFO    bt5151_credit_risk.graph        [supported] Missingness indicator for Type_of_Loan will rank within the top-8 features in global SHAP because its missingness correlates with target (max_target_d
+19:10:32 INFO    bt5151_credit_risk.graph        [supported] Num_of_Credit_Inquiries will have a significantly higher coefficient in tree-based models than in linear models (SHAP rank ≤7 vs LR coef |coef|<0.1) b
+19:10:32 INFO    bt5151_credit_risk.graph      exploratory leads: 4
+19:10:32 INFO    bt5151_credit_risk.graph        [exploratory] The ratio Total_EMI_per_month/Monthly_Inhand_Salary will yield higher mutual information than either feature alone because these two top MI features a
+19:10:32 INFO    bt5151_credit_risk.graph        [exploratory] An interaction term Delay_from_due_date × Interest_Rate will improve class separation because both features have strong linear (F=11471) and nonlinear
+19:10:32 INFO    bt5151_credit_risk.graph        [exploratory] Applying log transformation to highly skewed Total_EMI_per_month and Num_Credit_Inquiries will increase linear separability (ANOVA F increase by ≥20%)
+19:10:32 INFO    bt5151_credit_risk.graph        [exploratory] Missing-value imputation via target-aware encoding for Type_of_Loan missingness will outperform mean/mode imputation by ≥2 pp macro_f1 because missing
+19:10:32 INFO    bt5151_credit_risk.graph      model selection prediction: XGBoost will achieve macro_f1 ≥0.76, outperforming logistic regression by ≥4 pp because strong nonlinear signal in Total_EMI_per_month (MI=0.5471, F=1.04) is exploitable by trees while low feature correlation prevents capacity waste
+19:10:32 INFO    bt5151_credit_risk.graph      class struggle prediction: Standard will have the lowest recall (≤0.75) with Standard→Poor as the dominant confusion pair due to its conditional means being strictly between Good and Poor on the top three discriminative features
+19:10:32 INFO    bt5151_credit_risk.graph  >>> column-transform-spec
+19:11:22 INFO    bt5151_credit_risk.llm  LLM call [column-transform-spec] model=o3 input_tokens=12840 output_tokens=7379 duration=49.36s
+19:11:22 INFO    bt5151_credit_risk.graph      transform spec keys: ['transforms', 'reasoning']
+19:11:22 INFO    bt5151_credit_risk.graph      col ID                        action=drop  
+19:11:22 INFO    bt5151_credit_risk.graph      col Customer_ID               action=drop  
+19:11:22 INFO    bt5151_credit_risk.graph      col Month                     action=keep  strip whitespace, ordinal
+19:11:22 INFO    bt5151_credit_risk.graph      col Name                      action=drop  
+19:11:22 INFO    bt5151_credit_risk.graph      col Age                       action=keep  strip non-numeric, to_numeric, mark values <0 or >120 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col SSN                       action=drop  
+19:11:22 INFO    bt5151_credit_risk.graph      col Occupation                action=keep  replace '_______' with NaN, strip whitespace
+19:11:22 INFO    bt5151_credit_risk.graph      col Annual_Income             action=keep  strip non-numeric, to_numeric, clip to [0, 500000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Monthly_Inhand_Salary     action=keep  clip to [0, 20000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Num_Bank_Accounts         action=keep  mark values <0 or >60 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Num_Credit_Card           action=keep  mark values <0 or >60 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Interest_Rate             action=keep  mark values <0 or >100 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Num_of_Loan               action=keep  to_numeric, mark values <0 or >20 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Type_of_Loan              action=keep  split on ',| and ', strip whitespace, remove empty strings, multi_hot
+19:11:22 INFO    bt5151_credit_risk.graph      col Delay_from_due_date       action=keep  clip to [-5, 60]
+19:11:22 INFO    bt5151_credit_risk.graph      col Num_of_Delayed_Payment    action=keep  to_numeric, mark values <0 or >120 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Changed_Credit_Limit      action=keep  replace '_' with NaN, to_numeric, clip to [0, 100]
+19:11:22 INFO    bt5151_credit_risk.graph      col Num_Credit_Inquiries      action=keep  mark values <0 or >100 as NaN
+19:11:22 INFO    bt5151_credit_risk.graph      col Credit_Mix                action=keep  replace '_' with NaN, ordinal
+19:11:22 INFO    bt5151_credit_risk.graph      col Outstanding_Debt          action=keep  strip non-numeric, to_numeric, clip to [0, 1000000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Credit_Utilization_Ratio  action=keep  clip to [0, 100]
+19:11:22 INFO    bt5151_credit_risk.graph      col Credit_History_Age        action=keep  extract years and months, compute total_months = years*12 + months
+19:11:22 INFO    bt5151_credit_risk.graph      col Payment_of_Min_Amount     action=keep  strip whitespace
+19:11:22 INFO    bt5151_credit_risk.graph      col Total_EMI_per_month       action=keep  clip to [0, 60000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Amount_invested_monthly   action=keep  replace '__10000__' and 'nan' with NaN, strip non-numeric, to_numeric, clip to [0, 10000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Payment_Behaviour         action=keep  replace '!@9#%8' with NaN, strip whitespace
+19:11:22 INFO    bt5151_credit_risk.graph      col Monthly_Balance           action=keep  replace 'nan' and '__-333333333333333333333333333__' with NaN, strip non-numeric, to_numeric, clip to [-100000, 100000]
+19:11:22 INFO    bt5151_credit_risk.graph      col Credit_Score              action=drop  
+19:11:22 INFO    bt5151_credit_risk.graph      column-transform reasoning:
+19:11:22 INFO    bt5151_credit_risk.graph        ID: 100k unique values, no predictive value, listed as leakage in policy. Drop as identifier.
+19:11:22 INFO    bt5151_credit_risk.graph        Customer_ID: Primary grouping key for split strategy; must be excluded from features but kept for grouping. Role group_identifier.
+19:11:22 INFO    bt5151_credit_risk.graph        Month: Exactly 8 month names, natural calendar order. Treat as ordered_categorical with explicit mapping so models can leverage
+19:11:22 INFO    bt5151_credit_risk.graph        Name: High-cardinality personal name string and listed in leakage policy. Drop as identifier.
+19:11:22 INFO    bt5151_credit_risk.graph        Age: Should be constant per customer. Found negatives and underscore versions (e.g. -500, '28_'). Clean to numeric 0-120, the
+19:11:22 INFO    bt5151_credit_risk.graph        SSN: PII and unique; drop.
+19:11:22 INFO    bt5151_credit_risk.graph        Occupation: 16 occupational categories, garbage placeholder '_______'. Defer encoding so tree vs linear views can choose. Impute wit
+19:11:22 INFO    bt5151_credit_risk.graph        Annual_Income: Numeric but stored as string. Strip commas etc. Max 110k, but p99 << 500k. Clip 0-500k. Income stable per customer, so g
+19:11:22 INFO    bt5151_credit_risk.graph        Monthly_Inhand_Salary: Strong MI. Mechanical link to Annual_Income/12 when missing; declare fallback_formula then group median fallback. Clip 0
+19:11:22 INFO    bt5151_credit_risk.graph        Num_Bank_Accounts: Integer count. Implausible 1798 accounts—mark >60 as NaN; negative values too. Group median by customer keeps personal l
+19:11:22 INFO    bt5151_credit_risk.graph        Num_Credit_Card: Similar logic to bank accounts; >60 clearly noise (p99 849).
+19:11:22 INFO    bt5151_credit_risk.graph        Interest_Rate: Should be <=100%. Values in thousands are garbage. Mark >100 as NaN then global median (no strong per-customer stability
+19:11:22 INFO    bt5151_credit_risk.graph        Num_of_Loan: String ints with '-100' sentinel. Convert, allow 0-20, else NaN. Count field.
+19:11:22 INFO    bt5151_credit_risk.graph        Type_of_Loan: Comma-delimited multi-value; must be multi_hot indicators per unique loan type. Placeholder 'Not Specified' and string '
+19:11:22 INFO    bt5151_credit_risk.graph        Delay_from_due_date: Range logically about -5 (early) to ~60. p99=61 validates. Continuous integer but keep numeric_continuous.
+19:11:22 INFO    bt5151_credit_risk.graph        Num_of_Delayed_Payment: String counts with many 'nan'. Convert, allow 0-120 (ten years of monthly delays). Group median by customer.
+19:11:22 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: Float stored as str with '_' sentinel. Clip 0-100 (99th≈11, far from 100, generous upper bound).
+19:11:22 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: Distribution very long-tailed (max 2597). Nobody has >100 real inquiries; mark as NaN >100, median fill.
+19:11:22 INFO    bt5151_credit_risk.graph        Credit_Mix: Quality tier with natural order Bad<Standard<Good. Placeholder '_' to NaN. Encode ordinal 0/1/2.
+19:11:22 INFO    bt5151_credit_risk.graph        Outstanding_Debt: String numeric. Strip chars, clip 0-1,000,000 to kill any overflow garbage. Group median by customer.
+19:11:22 INFO    bt5151_credit_risk.graph        Credit_Utilization_Ratio: Already float 20-50. Keep but hard-clip 0-100 for safety.
+19:11:22 INFO    bt5151_credit_risk.graph        Credit_History_Age: Parse 'YY Years and MM Months' to total months count (integer). Stable per customer so group_median.
+19:11:22 INFO    bt5151_credit_risk.graph        Payment_of_Min_Amount: Three tokens Yes/No/NM. Treat as cleaned categorical; NM kept as category not missing because carries signal. Defer enco
+19:11:22 INFO    bt5151_credit_risk.graph        Total_EMI_per_month: Highly skewed; clip 0-60k (p99 56k). Median impute.
+19:11:22 INFO    bt5151_credit_risk.graph        Amount_invested_monthly: String numeric with '__10000__' sentinel and 'nan'. After coercion, clip 0-10k. Median fill.
+19:11:22 INFO    bt5151_credit_risk.graph        Payment_Behaviour: 7 behaviour buckets plus garbage '!@9#%8'. Replace sentinel with NaN. Defer encoding so FE can pick one-hot or target en
+19:11:22 INFO    bt5151_credit_risk.graph        Monthly_Balance: Highly derived and noisy with giant sentinel string. Provide formula Salary − EMI − Investments when possible, else grou
+19:11:22 INFO    bt5151_credit_risk.graph        Credit_Score: Target column for multiclass classification (Poor/Standard/Good). Must be dropped from feature frame.
+19:11:22 INFO    bt5151_credit_risk.graph  >>> generate-preprocessing-code
+19:12:01 INFO    bt5151_credit_risk.llm  LLM call [generate-preprocessing-code] model=gpt-4o input_tokens=16954 output_tokens=3521 duration=37.86s
+19:12:01 INFO    bt5151_credit_risk.graph      entrypoint: run_preprocessing, code length: 11022 chars
+19:12:01 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 1/5)
+19:12:01 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:12:01 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+19:15:20 INFO    bt5151_credit_risk.graph      returncode: None, timed_out: True, success: False
+19:15:20 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ad5928db71594ff38fc37297953c0977/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+19:15:20 WARNING bt5151_credit_risk.graph      missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+19:15:20 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+19:15:20 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': False, 'target_excluded': False, 'feature_frame_non_empty': False, 'group_overlap_zero': False}
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ad5928db71594ff38fc37297953c0977/split_manifest.json.
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ad5928db71594ff38fc37297953c0977/target.csv.
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ad5928db71594ff38fc37297953c0977/feature_frame.csv.
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+19:15:20 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+19:15:20 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+19:15:20 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+19:15:20 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 1/5)
+19:16:55 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=11738 output_tokens=10805 duration=94.17s
+19:16:55 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 2/5)
+19:16:55 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:16:55 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+19:19:08 INFO    bt5151_credit_risk.graph      returncode: 1, timed_out: False, success: False
+19:19:08 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+Traceback (most recent call last):
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/_execute_generated_preprocessing.py", line 28, in <module>
+    main()
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/_execute_generated_preprocessing.py", line 22, in main
+    result = entrypoint(raw_df, workspace_path)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/generated_preprocessing.py", line 81, in run_preprocessing
+    df['Num_of_Loan'] = s.fillna(df['Num_of_Loan'].median())
+                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/util/_decorators.py", line 336, in wrapper
+    return func(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/series.py", line 8196, in median
+    return NDFrame.median(
+           ^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/generic.py", line 11843, in median
+    return self._stat_function(
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/generic.py", line 11785, in _stat_function
+    return self._reduce(
+           ^^^^^^^^^^^^^
+  File "/home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/pandas/core/series.py", line 7480, in _reduce
+    result = delegat
+19:19:08 WARNING bt5151_credit_risk.graph      missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+19:19:08 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+19:19:08 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': False, 'target_excluded': False, 'feature_frame_non_empty': False, 'group_overlap_zero': False}
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/split_manifest.json.
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/target.csv.
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_e719939702104cda8c67ceae71d0bed2/feature_frame.csv.
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+19:19:08 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+19:19:08 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+19:19:08 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+19:19:08 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 2/5)
+19:19:41 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=11893 output_tokens=4962 duration=32.59s
+19:19:41 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 3/5)
+19:19:41 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:19:41 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+19:23:00 INFO    bt5151_credit_risk.graph      returncode: None, timed_out: True, success: False
+19:23:00 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ddb81dd8b2654ea9b3f7c91c03ca0c0e/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+19:23:00 WARNING bt5151_credit_risk.graph      missing artifacts: ['cleaned_frame.csv', 'feature_frame.csv', 'target.csv', 'split_manifest.json', 'preprocessing_report.json']
+19:23:00 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+19:23:00 INFO    bt5151_credit_risk.graph      validation passed: False, checks: {'split_manifest_exists': False, 'target_file_exists': False, 'feature_frame_readable': False, 'target_excluded': False, 'feature_frame_non_empty': False, 'group_overlap_zero': False}
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [split_manifest_exists] Split manifest was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ddb81dd8b2654ea9b3f7c91c03ca0c0e/split_manifest.json.
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [target_file_exists] Target file was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ddb81dd8b2654ea9b3f7c91c03ca0c0e/target.csv.
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_exists] Feature frame was not found at /home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_ddb81dd8b2654ea9b3f7c91c03ca0c0e/feature_frame.csv.
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [target_excluded] Feature frame is unavailable, so target exclusion could not be verified.
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [feature_frame_non_empty] Feature frame is unavailable, so non-empty validation could not be performed.
+19:23:00 WARNING bt5151_credit_risk.graph      validation error: [group_overlap_zero] Grouped split overlap could not be validated because the raw frame or split manifest is missing.
+19:23:00 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+19:23:00 INFO    bt5151_credit_risk.graph      skipping LLM quality review — structural validation failed
+19:23:00 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 3/5)
+19:24:34 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=11268 output_tokens=12542 duration=93.59s
+19:24:34 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 4/5)
+19:24:34 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:24:34 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+19:25:34 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+19:25:34 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_02efa81eab46441fab31c96b8107ee14/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+19:25:34 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+19:25:38 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'target_labels_not_encoded': True, 'feature_frame_readable': True, 'no_mangled_duplicate_columns': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+19:25:39 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 31 cols
+19:25:41 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+19:25:41 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+19:25:51 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=11198 output_tokens=244 duration=8.45s
+19:25:51 INFO    bt5151_credit_risk.graph      verdict: needs_repair, issues: 2
+19:25:51 WARNING bt5151_credit_risk.graph      [major/distribution_sanity] Monthly_Inhand_Salary: Monthly_Inhand_Salary has a max value of 41,666.67, which exceeds the expected range and indicates a possible clipping error.
+19:25:51 INFO    bt5151_credit_risk.graph      [minor/distribution_sanity] Total_EMI_per_month: Total_EMI_per_month has a max of 60,000 which matches the clipping boundary, suggesting possible outliers or unregulated data.
+19:25:51 INFO    bt5151_credit_risk.graph      summary: Major issue with exceeding expected range in Monthly_Inhand_Salary. Minor issue with Total_EMI_per_month's clipping boundary.
+19:25:51 WARNING bt5151_credit_risk.graph  >>> repair-preprocessing-code (attempt 4/5)
+19:26:29 INFO    bt5151_credit_risk.llm  LLM call [repair-preprocessing-code] model=o4-mini input_tokens=11204 output_tokens=4464 duration=38.81s
+19:26:29 INFO    bt5151_credit_risk.graph  >>> inspect-preprocessing-code (attempt 5/5)
+19:26:30 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:26:30 INFO    bt5151_credit_risk.graph  >>> execute-generated-preprocessing
+19:27:11 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+19:27:11 WARNING bt5151_credit_risk.graph      subprocess stderr:
+/home/tough/BT5151 GroupProject/generated_preprocessing_runs/generated_preprocessing_9415afb2c3fc40e9a633fe23debe5f5b/_execute_generated_preprocessing.py:21: DtypeWarning: Columns (0: Monthly_Balance) have mixed types. Specify dtype option on import or set low_memory=False.
+  raw_df = pd.read_csv(raw_frame_path)
+
+19:27:11 INFO    bt5151_credit_risk.graph  >>> validate-preprocessing-output
+19:27:14 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'split_manifest_exists': True, 'target_file_exists': True, 'target_labels_not_encoded': True, 'feature_frame_readable': True, 'no_mangled_duplicate_columns': True, 'target_excluded': True, 'feature_frame_non_empty': True, 'group_overlap_zero': True}
+19:27:14 INFO    bt5151_credit_risk.graph      feature_frame: 100000 rows x 31 cols
+19:27:16 INFO    bt5151_credit_risk.graph      class_names: ['Good', 'Poor', 'Standard'], train: 80000, test: 20000
+19:27:16 INFO    bt5151_credit_risk.graph  >>> review-preprocessing-quality
+19:27:22 INFO    bt5151_credit_risk.llm  LLM call [audit-preprocessing] model=gpt-4o input_tokens=11405 output_tokens=60 duration=5.43s
+19:27:22 INFO    bt5151_credit_risk.graph      verdict: pass, issues: 0
+19:27:22 INFO    bt5151_credit_risk.graph      summary: All previous issues have been addressed. Monthly_Inhand_Salary is now within the expected range and no regressions or new critical issues were found. Passed with no outstanding concerns.
+19:27:22 INFO    bt5151_credit_risk.graph  >>> generate-feature-engineering-code
+19:29:44 INFO    bt5151_credit_risk.llm  LLM call [generate-feature-engineering-code] model=o4-mini input_tokens=13121 output_tokens=10888 duration=140.98s
+19:29:44 INFO    bt5151_credit_risk.graph      entrypoint: engineer_features, code length: 12176 chars
+19:29:44 INFO    bt5151_credit_risk.graph      FE hypothesis: {"interactions_rationale": "Engineered eight domain-grounded features: EMI_to_Salary_Ratio (Total_EMI_per_month/Monthly_Inhand_Salary) because EMI(MI=0.5471) and Salary(MI=0.5187) are top signals and EDA suggests this ratio captures debt burden; Debt_to_Income_Ratio for leverage; Savings_Rate for cash buffer; Inquiries_per_Credit_Card normalizes MI=0.1114 inquiries by card count; Loan_per_Account for debt concentration; Delay_Ratio normalizes MI=0.1215 delayed payments by loan count; Interest_Burden captures debt\u00d7rate stress; Delay_Interest_Interaction combines Delay F=11471.89 and Interest MI=0.1705 to model nonlinear risk regimes. Each ratio/product was stabilized with train-median imputation and p99/p1 clipping.", "dropped_features_rationale": "No constant (nunique\u22641) or perfectly correlated (|r|>0.95) features detected (EDA.high_correlation_pairs empty), so all parent columns were retained for interaction creation.", "expected_impact": "EMI_to_Salary_Ratio should exceed raw EMI and salary in MI and SHAP importance, improving both linear and tree models. Delay_Interest_Interaction captures nonlinear interplay to boost macro-F1. Log1p on skewed EMI (skew=6.72) and Inquiries (skew=9.79) will reduce tail variance, aiding logistic regression convergence while tree models use raw values.", "eda_hypotheses_acted_on": ["Implemented exploratory lead 'Total_EMI_per_month/Monthly_Inhand_Salary ratio' as EMI_to_Salary_Ratio", "Implemented exploratory lead 'Delay_from_due_date \u00d7 Interest_Rate interaction' as Delay_Interest_Interaction", "Implemented exploratory lead 'Log-transform Total_EMI_per_month and Num_Credit_Inquiries' on linear view", "Did not implement exploratory lead 'Type_of_Loan missingness imputation' (no raw Type_of_Loan column post-preprocessing)", "No tested_predictions were directly implemented at feature engineering stage"]}
+19:29:44 INFO    bt5151_credit_risk.graph  >>> inspect-feature-engineering-code (attempt 1/3)
+19:29:44 INFO    bt5151_credit_risk.graph      inspection passed: True, issues: 0
+19:29:44 INFO    bt5151_credit_risk.graph  >>> execute-feature-engineering
+19:30:06 INFO    bt5151_credit_risk.graph      returncode: 0, timed_out: False, success: True
+19:30:06 INFO    bt5151_credit_risk.graph  >>> validate-feature-engineering
+19:30:13 INFO    bt5151_credit_risk.graph      validation passed: True, checks: {'report_file_exists': True, 'view_metadata_exists': True, 'linear_view_train_file_exists': True, 'linear_view_test_file_exists': True, 'linear_view_train_readable': True, 'linear_view_train_row_count_match': True, 'linear_view_test_readable': True, 'linear_view_test_row_count_match': True, 'linear_view_no_nans_in_train': True, 'linear_view_no_infs_in_train': True, 'linear_view_train_fully_numeric': True, 'linear_view_features_non_empty': True, 'linear_view_max_feature_cap': True, 'linear_view_no_nans_in_test': True, 'linear_view_no_infs_in_test': True, 'linear_view_test_fully_numeric': True, 'linear_view_column_alignment': True, 'tree_view_train_file_exists': True, 'tree_view_test_file_exists': True, 'tree_view_train_readable': True, 'tree_view_train_row_count_match': True, 'tree_view_test_readable': True, 'tree_view_test_row_count_match': True, 'tree_view_no_nans_in_train': True, 'tree_view_no_infs_in_train': True, 'tree_view_train_fully_numeric': True, 'tree_view_features_non_empty': True, 'tree_view_max_feature_cap': True, 'tree_view_no_nans_in_test': True, 'tree_view_no_infs_in_test': True, 'tree_view_test_fully_numeric': True, 'tree_view_column_alignment': True}
+19:30:16 INFO    bt5151_credit_risk.graph      feature views: {'linear_view': 59, 'tree_view': 45}
+19:30:16 INFO    bt5151_credit_risk.graph      default active view: tree_view
+19:30:16 INFO    bt5151_credit_risk.graph      model view map: {'logistic_regression': 'linear_view', 'random_forest': 'tree_view', 'xgboost': 'tree_view'}
+19:30:16 INFO    bt5151_credit_risk.graph      FE transformed (2):
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Total_EMI_per_month", "transform": "log1p", "original_skew": 6.72329243706184}
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Num_Credit_Inquiries", "transform": "log1p", "original_skew": 9.7862}
+19:30:16 INFO    bt5151_credit_risk.graph      FE added (8):
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "EMI_to_Salary_Ratio", "formula": "Total_EMI_per_month / Monthly_Inhand_Salary", "rationale": "combines top MI features (EMI MI=0.5471, Sal
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Debt_to_Income_Ratio", "formula": "Outstanding_Debt / Annual_Income", "rationale": "standard leverage metric: total debt vs annual earning
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Savings_Rate", "formula": "(Monthly_Inhand_Salary - Total_EMI_per_month) / Monthly_Inhand_Salary", "rationale": "net cash buffer fraction 
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Inquiries_per_Credit_Card", "formula": "Num_Credit_Inquiries / (Num_Credit_Card + 1)", "rationale": "normalizes MI=0.1114 inquiries by car
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Loan_per_Account", "formula": "Outstanding_Debt / (Num_Bank_Accounts + Num_Credit_Card + 1)", "rationale": "average debt per credit relati
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Delay_Ratio", "formula": "Num_of_Delayed_Payment / (Num_of_Loan + 1)", "rationale": "payment discipline normalized by loan count (Delay MI
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Interest_Burden", "formula": "Outstanding_Debt * Interest_Rate / 100", "rationale": "annual interest cost captures joint debt and rate str
+19:30:16 INFO    bt5151_credit_risk.graph        {"column": "Delay_Interest_Interaction", "formula": "Delay_from_due_date * Interest_Rate", "rationale": "captures nonlinear joint effect (Delay F=1147
+19:30:16 INFO    bt5151_credit_risk.graph  >>> train-models
+19:30:16 INFO    bt5151_credit_risk.graph      validation policy: {"type": "grouped_entity", "group_column": "Customer_ID", "time_column": null, "stratify_target": true}
+19:32:44 INFO    bt5151_credit_risk.graph      baseline metrics (3-fold CV on train): {'logistic_regression': {'macro_f1': 0.6472}, 'random_forest': {'macro_f1': 0.7371}, 'xgboost': {'macro_f1': 0.7682}}
+19:32:50 INFO    bt5151_credit_risk.llm  LLM call [reason-hyperparameter-grid] model=gpt-4o input_tokens=1427 output_tokens=336 duration=6.33s
+19:32:50 INFO    bt5151_credit_risk.graph      LLM-reasoned grids:
+19:32:50 INFO    bt5151_credit_risk.graph        logistic_regression: {"model__C": {"type": "float", "low": 0.01, "high": 50.0, "log": true}}
+19:32:50 INFO    bt5151_credit_risk.graph        random_forest: {"max_depth": {"type": "int", "low": 10, "high": 20}, "min_samples_split": {"type": "int", "low": 2, "high": 15}}
+19:32:50 INFO    bt5151_credit_risk.graph        xgboost: {"max_depth": {"type": "int", "low": 6, "high": 15}, "learning_rate": {"type": "float", "low": 0.01, "high": 0.3, "log": true}, "subsample": {"type": "float", "low": 0.7, "high": 1.0}, "colsample_bytree": {"type": "float", "low": 0.7, "high": 1.0}}
+19:32:50 INFO    bt5151_credit_risk.graph      tuning reasoning: With 80k rows and 45 features, moderate tree depth (10-20 for RF, 6-15 for XGB) captures complex patterns while balancing overfitting risk and computation time. The imbalanced class distribution suggests a need for tuning hyperparameters that can control model complexity and overfitting. Log-uniform learning_rate from 0.01-0.3 allows efficient exploration for XGBoost. Pipeline defaults are chosen to simplify Logistic Regression while allowing broad C exploration.
+19:32:50 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+19:32:50 INFO    bt5151_credit_risk.train      class balance [tuning subset]: cls0=2564 (17.1%), cls1=4425 (29.5%), cls2=8011 (53.4%)
+19:32:52 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+19:32:52 INFO    bt5151_credit_risk.train      logistic_regression: tuning with Optuna (10 trials, 5-fold CV)...
+19:32:52 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 0 train]: cls0=2052 (17.1%), cls1=3542 (29.5%), cls2=6406 (53.4%)
+19:32:52 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 0 val]: cls0=512 (17.1%), cls1=883 (29.4%), cls2=1605 (53.5%)
+19:33:06 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 1 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:33:06 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 1 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:33:34 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 2 train]: cls0=2051 (17.1%), cls1=3540 (29.5%), cls2=6409 (53.4%)
+19:33:34 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 2 val]: cls0=513 (17.1%), cls1=885 (29.5%), cls2=1602 (53.4%)
+19:33:51 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 3 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:33:51 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 3 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:34:17 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 4 train]: cls0=2049 (17.1%), cls1=3540 (29.5%), cls2=6411 (53.4%)
+19:34:17 INFO    bt5151_credit_risk.train      class balance [logistic_regression fold 4 val]: cls0=515 (17.2%), cls1=885 (29.5%), cls2=1600 (53.3%)
+19:54:30 INFO    bt5151_credit_risk.train      logistic_regression: best_cv_score=0.6428 best_params={'model__C': 0.016400214911202308}
+19:55:15 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+19:55:15 INFO    bt5151_credit_risk.train      class balance [tuning subset]: cls0=2564 (17.1%), cls1=4425 (29.5%), cls2=8011 (53.4%)
+19:55:17 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+19:55:17 INFO    bt5151_credit_risk.train      random_forest: tuning with Optuna (10 trials, 5-fold CV)...
+19:55:17 INFO    bt5151_credit_risk.train      class balance [random_forest fold 0 train]: cls0=2052 (17.1%), cls1=3542 (29.5%), cls2=6406 (53.4%)
+19:55:17 INFO    bt5151_credit_risk.train      class balance [random_forest fold 0 val]: cls0=512 (17.1%), cls1=883 (29.4%), cls2=1605 (53.5%)
+19:55:20 INFO    bt5151_credit_risk.train      class balance [random_forest fold 1 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:55:20 INFO    bt5151_credit_risk.train      class balance [random_forest fold 1 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:55:23 INFO    bt5151_credit_risk.train      class balance [random_forest fold 2 train]: cls0=2051 (17.1%), cls1=3540 (29.5%), cls2=6409 (53.4%)
+19:55:23 INFO    bt5151_credit_risk.train      class balance [random_forest fold 2 val]: cls0=513 (17.1%), cls1=885 (29.5%), cls2=1602 (53.4%)
+19:55:31 INFO    bt5151_credit_risk.train      class balance [random_forest fold 3 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:55:31 INFO    bt5151_credit_risk.train      class balance [random_forest fold 3 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:55:33 INFO    bt5151_credit_risk.train      class balance [random_forest fold 4 train]: cls0=2049 (17.1%), cls1=3540 (29.5%), cls2=6411 (53.4%)
+19:55:33 INFO    bt5151_credit_risk.train      class balance [random_forest fold 4 val]: cls0=515 (17.2%), cls1=885 (29.5%), cls2=1600 (53.3%)
+19:57:49 INFO    bt5151_credit_risk.train      random_forest: best_cv_score=0.6761 best_params={'max_depth': 11, 'min_samples_split': 4}
+19:58:41 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+19:58:41 INFO    bt5151_credit_risk.train      class balance [tuning subset]: cls0=2564 (17.1%), cls1=4425 (29.5%), cls2=8011 (53.4%)
+19:58:42 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+19:58:42 INFO    bt5151_credit_risk.train      xgboost: tuning with Optuna (10 trials, 5-fold CV)...
+19:58:43 INFO    bt5151_credit_risk.train      class balance [xgboost fold 0 train]: cls0=2052 (17.1%), cls1=3542 (29.5%), cls2=6406 (53.4%)
+19:58:43 INFO    bt5151_credit_risk.train      class balance [xgboost fold 0 val]: cls0=512 (17.1%), cls1=883 (29.4%), cls2=1605 (53.5%)
+20:00:27 INFO    bt5151_credit_risk.train      class balance [xgboost fold 1 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+20:00:27 INFO    bt5151_credit_risk.train      class balance [xgboost fold 1 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+20:01:55 INFO    bt5151_credit_risk.train      class balance [xgboost fold 2 train]: cls0=2051 (17.1%), cls1=3540 (29.5%), cls2=6409 (53.4%)
+20:01:55 INFO    bt5151_credit_risk.train      class balance [xgboost fold 2 val]: cls0=513 (17.1%), cls1=885 (29.5%), cls2=1602 (53.4%)
+20:03:06 INFO    bt5151_credit_risk.train      class balance [xgboost fold 3 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+20:03:06 INFO    bt5151_credit_risk.train      class balance [xgboost fold 3 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+20:04:20 INFO    bt5151_credit_risk.train      class balance [xgboost fold 4 train]: cls0=2049 (17.1%), cls1=3540 (29.5%), cls2=6411 (53.4%)
+20:04:20 INFO    bt5151_credit_risk.train      class balance [xgboost fold 4 val]: cls0=515 (17.2%), cls1=885 (29.5%), cls2=1600 (53.3%)

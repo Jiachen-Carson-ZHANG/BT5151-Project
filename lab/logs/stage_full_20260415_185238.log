@@ -219,3 +219,276 @@ Raw output (first 500 chars): {"code":"import json\nimport numpy as np\nimport p
 19:10:44 INFO    bt5151_credit_risk.train      class balance [random_forest fold 3 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
 19:10:45 INFO    bt5151_credit_risk.train      class balance [random_forest fold 4 train]: cls0=2049 (17.1%), cls1=3540 (29.5%), cls2=6411 (53.4%)
 19:10:45 INFO    bt5151_credit_risk.train      class balance [random_forest fold 4 val]: cls0=515 (17.2%), cls1=885 (29.5%), cls2=1600 (53.3%)
+19:12:05 INFO    bt5151_credit_risk.train      random_forest: best_cv_score=0.6719 best_params={'max_depth': 12, 'min_samples_split': 3}
+19:12:43 INFO    bt5151_credit_risk.train      Subsampled 80000 → 15000 rows for tuning CV
+19:12:43 INFO    bt5151_credit_risk.train      class balance [tuning subset]: cls0=2564 (17.1%), cls1=4425 (29.5%), cls2=8011 (53.4%)
+19:12:44 INFO    bt5151_credit_risk.train      tuning validation policy: grouped_entity (5 fold(s))
+19:12:44 INFO    bt5151_credit_risk.train      xgboost: tuning with Optuna (10 trials, 5-fold CV)...
+19:12:45 INFO    bt5151_credit_risk.train      class balance [xgboost fold 0 train]: cls0=2052 (17.1%), cls1=3542 (29.5%), cls2=6406 (53.4%)
+19:12:45 INFO    bt5151_credit_risk.train      class balance [xgboost fold 0 val]: cls0=512 (17.1%), cls1=883 (29.4%), cls2=1605 (53.5%)
+19:12:54 INFO    bt5151_credit_risk.train      class balance [xgboost fold 1 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:12:54 INFO    bt5151_credit_risk.train      class balance [xgboost fold 1 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:13:15 INFO    bt5151_credit_risk.train      class balance [xgboost fold 2 train]: cls0=2051 (17.1%), cls1=3540 (29.5%), cls2=6409 (53.4%)
+19:13:15 INFO    bt5151_credit_risk.train      class balance [xgboost fold 2 val]: cls0=513 (17.1%), cls1=885 (29.5%), cls2=1602 (53.4%)
+19:13:35 INFO    bt5151_credit_risk.train      class balance [xgboost fold 3 train]: cls0=2052 (17.1%), cls1=3539 (29.5%), cls2=6409 (53.4%)
+19:13:35 INFO    bt5151_credit_risk.train      class balance [xgboost fold 3 val]: cls0=512 (17.1%), cls1=886 (29.5%), cls2=1602 (53.4%)
+19:13:47 INFO    bt5151_credit_risk.train      class balance [xgboost fold 4 train]: cls0=2049 (17.1%), cls1=3540 (29.5%), cls2=6411 (53.4%)
+19:13:47 INFO    bt5151_credit_risk.train      class balance [xgboost fold 4 val]: cls0=515 (17.2%), cls1=885 (29.5%), cls2=1600 (53.3%)
+21:20:57 INFO    bt5151_credit_risk.train      xgboost: best_cv_score=0.6652 best_params={'max_depth': 6, 'learning_rate': 0.2521267904777921, 'subsample': 0.9896896099223678, 'colsample_bytree': 0.9425192044349383}
+21:20:58 INFO    bt5151_credit_risk.train      xgboost early-stopping policy: grouped_entity (train=68000, eval=12000)
+21:22:51 INFO    bt5151_credit_risk.train      xgboost: early stopping found best_n_trees=89
+21:25:39 INFO    bt5151_credit_risk.train      xgboost learning curve: 164 rounds, best val_loss=0.739152 at round 89, final=0.748351
+21:25:39 INFO    bt5151_credit_risk.graph      trained models: ['logistic_regression', 'random_forest', 'xgboost']
+21:25:39 INFO    bt5151_credit_risk.graph  >>> evaluate-models
+21:25:45 INFO    bt5151_credit_risk.graph      logistic_regression: accuracy=0.6325 macro_f1=0.6301
+21:25:45 INFO    bt5151_credit_risk.graph      logistic_regression confusion matrix (rows=true, cols=pred):
+21:25:45 INFO    bt5151_credit_risk.graph        Good: [2944, 162, 588]
+21:25:45 INFO    bt5151_credit_risk.graph        Poor: [735, 4076, 915]
+21:25:45 INFO    bt5151_credit_risk.graph        Standard: [2327, 2623, 5630]
+21:25:45 INFO    bt5151_credit_risk.graph      logistic_regression  Good: precision=0.490 recall=0.797 f1=0.607 support=3694
+21:25:45 INFO    bt5151_credit_risk.graph      logistic_regression  Poor: precision=0.594 recall=0.712 f1=0.648 support=5726
+21:25:45 INFO    bt5151_credit_risk.graph      logistic_regression  Standard: precision=0.789 recall=0.532 f1=0.636 support=10580
+21:25:45 INFO    bt5151_credit_risk.graph      random_forest: accuracy=0.6862 macro_f1=0.6824
+21:25:45 INFO    bt5151_credit_risk.graph      random_forest confusion matrix (rows=true, cols=pred):
+21:25:45 INFO    bt5151_credit_risk.graph        Good: [3016, 109, 569]
+21:25:45 INFO    bt5151_credit_risk.graph        Poor: [586, 4565, 575]
+21:25:45 INFO    bt5151_credit_risk.graph        Standard: [2035, 2402, 6143]
+21:25:45 INFO    bt5151_credit_risk.graph      random_forest  Good: precision=0.535 recall=0.816 f1=0.646 support=3694
+21:25:45 INFO    bt5151_credit_risk.graph      random_forest  Poor: precision=0.645 recall=0.797 f1=0.713 support=5726
+21:25:45 INFO    bt5151_credit_risk.graph      random_forest  Standard: precision=0.843 recall=0.581 f1=0.688 support=10580
+21:25:45 INFO    bt5151_credit_risk.graph      xgboost: accuracy=0.6883 macro_f1=0.6828
+21:25:45 INFO    bt5151_credit_risk.graph      xgboost confusion matrix (rows=true, cols=pred):
+21:25:45 INFO    bt5151_credit_risk.graph        Good: [2927, 122, 645]
+21:25:45 INFO    bt5151_credit_risk.graph        Poor: [521, 4429, 776]
+21:25:45 INFO    bt5151_credit_risk.graph        Standard: [1979, 2192, 6409]
+21:25:45 INFO    bt5151_credit_risk.graph      xgboost  Good: precision=0.539 recall=0.792 f1=0.642 support=3694
+21:25:45 INFO    bt5151_credit_risk.graph      xgboost  Poor: precision=0.657 recall=0.773 f1=0.710 support=5726
+21:25:45 INFO    bt5151_credit_risk.graph      xgboost  Standard: precision=0.819 recall=0.606 f1=0.696 support=10580
+21:25:45 INFO    bt5151_credit_risk.graph  >>> training-diagnostics
+21:26:31 INFO    bt5151_credit_risk.llm  LLM call [generate-training-diagnostics] model=o4-mini input_tokens=7166 output_tokens=4084 duration=42.58s
+21:26:31 INFO    bt5151_credit_risk.graph      Good: struggle=low — Recall~0.79, highest among classes. Confusion matrix (XGBoost) shows 17.5% of Good samples misclassified as Standard vs 
+21:26:31 INFO    bt5151_credit_risk.graph      Poor: struggle=medium — Recall~0.77, moderate difficulty. In XGBoost, 13.6% of Poor samples go to Standard vs 9.1% to Good (1.5:1), suggesting s
+21:26:31 INFO    bt5151_credit_risk.graph      Standard: struggle=high — Recall~0.61, lowest. Errors split almost evenly: 20.7% → Poor vs 18.7% → Good, reflecting its intermediate feature means
+21:26:31 INFO    bt5151_credit_risk.graph      capacity logistic_regression: Underfitting. Best C=0.016 indicates heavy regularisation; macro_f1=0.630 vs cv=0.619 (gap 1.1pp) and 5.2pp below XGBoost confirms inability to captur
+21:26:31 INFO    bt5151_credit_risk.graph      capacity random_forest: Well-fitted. max_depth=12 and min_samples_split=3 capture necessary interactions; cv=0.672 vs test=0.682 (gap ~1pp, test>cv) indicates good generaliza
+21:26:31 INFO    bt5151_credit_risk.graph      capacity xgboost: Slight overfitting. max_depth=6, learning_rate=0.252; cv=0.665 vs test=0.683 (gap ~1.75pp). Learning curves show validation mlogloss plateau by ~30 ro
+21:26:31 INFO    bt5151_credit_risk.graph      hypothesis validation: 3 tested predictions checked
+21:26:31 INFO    bt5151_credit_risk.graph        [refuted] XGBoost will outperform Logistic Regression by ≥6 percentage points in macro_f1  → XGBoost macro_f1=0.6828 vs LR=0.6301, gap=5.07pp (<6pp)
+21:26:31 INFO    bt5151_credit_risk.graph        [inconclusive] Total_EMI_per_month will rank #1 in global SHAP importance with mean |SHAP| ≥1.8 → No SHAP importance data provided
+21:26:31 INFO    bt5151_credit_risk.graph        [inconclusive] Missingness indicator for Type_of_Loan will appear in the top-5 features by SHAP → Feature not implemented and no SHAP data
+21:26:31 INFO    bt5151_credit_risk.graph  >>> select-model
+21:26:36 DEBUG   matplotlib  matplotlib data path: /home/tough/BT5151 GroupProject/.venv/lib/python3.12/site-packages/matplotlib/mpl-data
+21:26:36 DEBUG   matplotlib  CONFIGDIR=/home/tough/.config/matplotlib
+21:26:36 DEBUG   matplotlib  interactive is False
+21:26:36 DEBUG   matplotlib  platform is linux
+21:26:36 DEBUG   matplotlib  CACHEDIR=/home/tough/.cache/matplotlib
+21:26:36 DEBUG   matplotlib.font_manager  Using fontManager instance from /home/tough/.cache/matplotlib/fontlist-v390.json
+21:26:52 INFO    bt5151_credit_risk.graph      global SHAP top-10 features:
+21:26:52 INFO    bt5151_credit_risk.graph        Interest_Burden: 0.3984
+21:26:52 INFO    bt5151_credit_risk.graph        Interest_Rate: 0.2007
+21:26:52 INFO    bt5151_credit_risk.graph        Credit_Mix: 0.1796
+21:26:52 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 0.1669
+21:26:52 INFO    bt5151_credit_risk.graph        Delay_from_due_date: 0.1537
+21:26:52 INFO    bt5151_credit_risk.graph        Num_Credit_Card: 0.1350
+21:26:52 INFO    bt5151_credit_risk.graph        Payment_of_Min_Amount: 0.1171
+21:26:52 INFO    bt5151_credit_risk.graph        Changed_Credit_Limit: 0.1047
+21:26:52 INFO    bt5151_credit_risk.graph        Num_Credit_Inquiries: 0.0758
+21:26:52 INFO    bt5151_credit_risk.graph        Payment_Behaviour_Low_spent_Small_value_payments: 0.0682
+21:26:56 INFO    bt5151_credit_risk.llm  LLM call [reason-model-selection] model=gpt-4o input_tokens=2784 output_tokens=269 duration=3.45s
+21:26:56 INFO    bt5151_credit_risk.graph      selected: xgboost
+21:26:56 INFO    bt5151_credit_risk.graph      justification: XGBoost shows the highest overall accuracy (0.68825) and slightly higher macro_f1 (0.682823) compared to Random Forest (0.682417). It handles the 'Standard' class slightly better with a macro_f1 score of 0.696, which is important as this is the largest class by support. The weighted_f1 is also the highest for XGBoost, suggesting that it maintains strong performance across all classes. Additionally, XGBoost's CV score (0.6652) and test score show a smaller gap compared to Random Forest, indicating lower risk of overfitting.
+21:26:56 INFO    bt5151_credit_risk.graph      hypothesis validation: The top features from EDA, such as 'Total_EMI_per_month', are not as prominent in the SHAP values, which suggests some disconnect in expected vs observed importance. However, 'EMI_to_Salary_Ratio', which was hypothesized to be important from the feature engineering efforts, is within the top features by SHAP importance. Expected increases in SHAP prominence for interest burden-related features were observed. Surprising results include 'Interest_Burden' being the most important feature by SHAP, despite not having top MI scores in EDA.
+21:26:56 INFO    bt5151_credit_risk.graph  >>> global-xai
+21:26:56 INFO    bt5151_credit_risk.graph      SHAP reused from select-model (skipping recomputation)
+21:26:56 INFO    bt5151_credit_risk.graph      SHAP beeswarm: 10 features, dependence: 3 features
+21:28:13 INFO    bt5151_credit_risk.graph      PFI grouped top-5:
+21:28:13 INFO    bt5151_credit_risk.graph        Interest_Burden: 0.0596 (n_cols=1)
+21:28:13 INFO    bt5151_credit_risk.graph        Delay_from_due_date: 0.0553 (n_cols=1)
+21:28:13 INFO    bt5151_credit_risk.graph        Interest_Rate: 0.0521 (n_cols=1)
+21:28:13 INFO    bt5151_credit_risk.graph        Credit_Mix: 0.0478 (n_cols=1)
+21:28:13 INFO    bt5151_credit_risk.graph        Outstanding_Debt: 0.0413 (n_cols=1)
+21:29:04 INFO    bt5151_credit_risk.graph      PDP computed for 5 features: ['Interest_Burden', 'Interest_Rate', 'Credit_Mix', 'Outstanding_Debt', 'Delay_from_due_date']
+21:29:21 INFO    bt5151_credit_risk.graph      ALE computed for 5 features: ['Interest_Burden', 'Interest_Rate', 'Credit_Mix', 'Outstanding_Debt', 'Delay_from_due_date']
+21:29:21 INFO    bt5151_credit_risk.graph      methods used: ['shap', 'pfi_grouped', 'pdp', 'ale']
+21:29:21 INFO    bt5151_credit_risk.graph  >>> local-xai (casebook)
+21:29:32 INFO    bt5151_credit_risk.graph      selected 9 local XAI cases
+21:29:32 INFO    bt5151_credit_risk.graph        [representative] row=2405 true=Good pred=Good conf=0.982
+21:29:32 INFO    bt5151_credit_risk.graph        [borderline] row=5954 true=Good pred=Good conf=0.342
+21:29:32 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=5549 true=Good pred=Standard conf=0.949 confused_with=Standard
+21:29:32 INFO    bt5151_credit_risk.graph        [representative] row=17984 true=Poor pred=Poor conf=0.954
+21:29:32 INFO    bt5151_credit_risk.graph        [borderline] row=13116 true=Poor pred=Poor conf=0.350
+21:29:32 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=18614 true=Poor pred=Standard conf=0.948 confused_with=Standard
+21:29:32 INFO    bt5151_credit_risk.graph        [representative] row=11747 true=Standard pred=Standard conf=0.964
+21:29:32 INFO    bt5151_credit_risk.graph        [borderline] row=17545 true=Standard pred=Standard conf=0.350
+21:29:32 INFO    bt5151_credit_risk.graph        [worst_misclassification] row=5978 true=Standard pred=Good conf=0.976 confused_with=Good
+21:29:32 INFO    bt5151_credit_risk.graph  >>> interpret-global-xai
+21:29:58 INFO    bt5151_credit_risk.llm  LLM call [interpret-global-xai] model=o4-mini input_tokens=96096 output_tokens=3460 duration=26.44s
+21:29:58 INFO    bt5151_credit_risk.graph      observation: Interest_Burden is the top SHAP feature with mean_abs_shap=0.3984, nearly twice the next feature (Interest_Rate=0.2007).
+21:29:58 INFO    bt5151_credit_risk.graph      observation: Grouped PFI ranks Delay_from_due_date second (importance_mean=0.0553) while SHAP ranks it fifth (mean_abs_shap=0.1537).
+21:29:58 INFO    bt5151_credit_risk.graph      observation: PDP for Credit_Mix shows predicted Good probability rising from 0.1648 at mix=0 to 0.3572 at mix=2 (Δ≈0.1924).
+21:29:58 INFO    bt5151_credit_risk.graph      insight: The perfect overlap of top-5 features by both SHAP and grouped PFI (Interest_Burden, Delay_from_due_date, Interest_Rate,
+21:29:58 INFO    bt5151_credit_risk.graph      insight: Payment_of_Min_Amount appears in the top-10 PFI (0.0262) but only 7th in SHAP (0.1171), implying its predictive value ar
+21:29:58 INFO    bt5151_credit_risk.graph      SHAP/PFI agreement: ['Interest_Burden', 'Delay_from_due_date', 'Interest_Rate', 'Credit_Mix', 'Outstanding_Debt']
+21:29:58 INFO    bt5151_credit_risk.graph      consensus: Strong agreement on the top-5 features indicates the model relies centrally on interest and payment-delay metrics. Payment_of_Min_Amount’s i
+21:29:58 INFO    bt5151_credit_risk.graph      global [tested] Increasing Credit_Mix from 0 (worst) to 2 (best) increases predicted Good probability by >0.19 on average
+21:29:58 INFO    bt5151_credit_risk.graph      global [supported] Payment_of_Min_Amount influences predictions primarily through interactions rather than marginal contributions
+21:29:58 INFO    bt5151_credit_risk.graph      global [exploratory] High Interest_Burden combined with high Interest_Rate synergistically amplifies probability of Poor classification
+21:29:58 INFO    bt5151_credit_risk.graph  >>> interpret-local-xai
+21:30:37 INFO    bt5151_credit_risk.llm  LLM call [interpret-local-xai] model=o4-mini input_tokens=9738 output_tokens=6085 duration=37.96s
+21:30:37 INFO    bt5151_credit_risk.graph      [Good] worst: Row 5549 (True=Good→Pred=Standard, conf=0.9488) is lured into Standard by high Interest_Rate (+0.3721), strong Credit_Mix (+0.3232), and ele
+21:30:37 INFO    bt5151_credit_risk.graph      [Poor] worst: Row 18614 (True=Poor→Pred=Standard, conf=0.9482) is confidently mis‐routed by strong Credit_Mix (+0.4031), high Outstanding_Debt (+0.2877), 
+21:30:37 INFO    bt5151_credit_risk.graph      [Standard] worst: Row 5978 (True=Standard→Pred=Good, conf=0.9758) is misled to Good by many Num_Credit_Card (+0.6675), low Interest_Rate (+0.3536), and elevat
+21:30:37 INFO    bt5151_credit_risk.graph      confusion direction: Good → Standard asymmetry: the model over-predicts Standard on Good cases under uncertainty (e.g. row 5549).
+21:30:37 INFO    bt5151_credit_risk.graph      thinnest boundary: The Good vs Standard boundary is most fragile on Num_Credit_Card—small changes flip row 5954’s prediction.
+21:30:37 INFO    bt5151_credit_risk.graph      local [tested] For the borderline Good case at row 5954, increasing Num_Credit_Card to the representative level (as in row 2405) will i
+21:30:37 INFO    bt5151_credit_risk.graph      local [supported] Delay_from_due_date near 0–5 days creates a thin margin between Good and Standard
+21:30:37 INFO    bt5151_credit_risk.graph      local [exploratory] Occupation category interacts with high Interest_Rate to systematically push Good cases into Standard
+21:30:37 INFO    bt5151_credit_risk.graph  >>> package-analysis-bundle
+21:30:37 INFO    bt5151_credit_risk.graph      analysis bundle saved to /home/tough/BT5151 GroupProject/lab/logs/analysis_bundle_20260415_185238.json
+21:30:37 INFO    bt5151_credit_risk.graph      bundle keys: ['metadata', 'eda_hypotheses', 'training_diagnostics', 'global_xai_interpretation', 'local_xai_interpretation', 'local_casebook', 'feature_engineering_hypothesis', 'selection_justification']
+21:30:37 INFO    bt5151_credit_risk.graph  >>> run-inference
+21:30:37 INFO    bt5151_credit_risk.graph      row 42 → predicted: Good, confidence: 0.7066
+21:30:37 INFO    bt5151_credit_risk.graph      SHAP [Good] Interest_Rate = 0.2745 (toward)
+21:30:37 INFO    bt5151_credit_risk.graph      SHAP [Good] Interest_Burden = 0.2109 (toward)
+21:30:37 INFO    bt5151_credit_risk.graph      SHAP [Good] Payment_of_Min_Amount = 0.2063 (toward)
+21:30:37 INFO    bt5151_credit_risk.graph      SHAP [Good] Credit_Mix = 0.1596 (toward)
+21:30:37 INFO    bt5151_credit_risk.graph      SHAP [Good] Delay_from_due_date = 0.1436 (toward)
+21:30:37 INFO    bt5151_credit_risk.graph      PDP [Interest_Rate] val=8.000 → grid_pct=20%, pd={'Good': 0.2601, 'Poor': 0.2643, 'Standard': 0.4756}
+21:30:37 INFO    bt5151_credit_risk.graph      PDP [Interest_Burden] val=43.856 → grid_pct=4%, pd={'Good': 0.2615, 'Poor': 0.2073, 'Standard': 0.5312}
+21:30:37 INFO    bt5151_credit_risk.graph      PDP [Credit_Mix] val=2.000 → grid_pct=100%, pd={'Good': 0.3572, 'Poor': 0.4045, 'Standard': 0.2384}
+21:30:37 INFO    bt5151_credit_risk.graph      PDP [Delay_from_due_date] val=8.000 → grid_pct=10%, pd={'Good': 0.2661, 'Poor': 0.3239, 'Standard': 0.41}
+21:30:37 INFO    bt5151_credit_risk.graph      confidence_diagnosis: caution=low, 0.7066 — confidence 0.71 is in line with typical correct-prediction confidence for Good
+21:30:37 INFO    bt5151_credit_risk.graph      nearest casebook: [representative] row=2405 sim=0.999
+21:30:37 INFO    bt5151_credit_risk.graph  >>> explain-risk
+21:31:14 INFO    bt5151_credit_risk.llm  LLM call [explain-risk] model=o4-mini input_tokens=15862 output_tokens=4595 duration=36.50s
+21:31:14 INFO    bt5151_credit_risk.graph      risk_level: low, confidence_band: high, caution: low, action: standard_processing
+21:31:14 INFO    run_stage  === Stage 'full' completed in 9511.4s ===
+21:31:14 INFO    run_stage  --- dataset-policy-spec ---
+21:31:14 INFO    run_stage    target_column: Credit_Score
+21:31:14 INFO    run_stage    task_type: multiclass_classification
+21:31:14 INFO    run_stage    split_strategy: {'type': 'grouped_holdout', 'test_size': 0.2, 'group_column': 'Customer_ID'}
+21:31:14 INFO    run_stage    rows: 100000, target_distribution: {'Standard': 53174, 'Poor': 28998, 'Good': 17828}
+21:31:14 INFO    run_stage  --- exploratory-data-analysis ---
+21:31:14 INFO    run_stage    high-correlation pairs (|r|>0.8): 0
+21:31:14 INFO    run_stage    highly skewed (|skew|>2): ['Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_Credit_Inquiries', 'Total_EMI_per_month']
+21:31:14 INFO    run_stage    high-cardinality (>20): ['ID', 'Monthly_Balance', 'Amount_invested_monthly', 'Annual_Income', 'Outstanding_Debt', 'SSN', 'Customer_ID', 'Name', 'Type_of_Loan', 'Changed_Credit_Limit', 'Age', 'Num_of_Delayed_Payment', 'Num_of_Loan', 'Credit_History_Age']
+21:31:14 INFO    run_stage    MNAR suspects: ['Type_of_Loan']
+21:31:14 INFO    run_stage    top discriminative features (mutual information):
+21:31:14 INFO    run_stage      Total_EMI_per_month: MI=0.5471
+21:31:14 INFO    run_stage      Monthly_Inhand_Salary: MI=0.5187
+21:31:14 INFO    run_stage      Interest_Rate: MI=0.1705
+21:31:14 INFO    run_stage      Delay_from_due_date: MI=0.1215
+21:31:14 INFO    run_stage      Num_Credit_Inquiries: MI=0.1114
+21:31:14 INFO    run_stage      Num_Credit_Card: MI=0.1048
+21:31:14 INFO    run_stage      Num_Bank_Accounts: MI=0.0995
+21:31:14 INFO    run_stage      Credit_Utilization_Ratio: MI=0.0000
+21:31:14 INFO    run_stage    top ANOVA features:
+21:31:14 INFO    run_stage      Delay_from_due_date: F=11471.89 (p=0.000000)
+21:31:14 INFO    run_stage      Monthly_Inhand_Salary: F=1903.07 (p=0.000000)
+21:31:14 INFO    run_stage      Credit_Utilization_Ratio: F=105.30 (p=0.000000)
+21:31:14 INFO    run_stage      Num_Credit_Inquiries: F=6.26 (p=0.001921)
+21:31:14 INFO    run_stage      Num_Bank_Accounts: F=5.50 (p=0.004072)
+21:31:14 INFO    run_stage  --- column-transform-spec ---
+21:31:14 INFO    run_stage    columns: 23 kept, 5 dropped
+21:31:14 INFO    run_stage    reasoning (28 columns):
+21:31:14 INFO    run_stage      ID: Row-unique hexadecimal string; 100 k uniques, predictive leakage risk, policy mandates drop. semantic_role = identifier.
+21:31:14 INFO    run_stage      Customer_ID: Entity key that recurs across months (12.5 k uniques, 8 rows each). Required for grouped split but must be excluded from features. Marked group_identifier.
+21:31:14 INFO    run_stage      Month: Only 8 valid month names, inherent chronological order (Jan→Aug). Assign ordered_categorical with explicit mapping 0-7. Mode fill sufficient because missingness is negligible; no group conditioning needed.
+21:31:14 INFO    run_stage      Name: High-cardinality personal name (10 k uniques) considered PII and explicitly listed in leakage policy. Drop as identifier.
+21:31:14 INFO    run_stage      Age: Stored as strings, negatives (-500) and underscores. Convert after stripping non-digits; plausible domain 0-120. Age is invariant within a customer, so impute with customer median.
+21:31:14 INFO    run_stage      SSN: PII with 12.5 k uniques, directly in policy drop list. semantic_role identifier.
+21:31:14 INFO    run_stage      Occupation: 16 categories, placeholder '_______' for missing. No natural order. Defer encoding so tree view can frequency-encode while linear view one-hots later.
+21:31:14 INFO    run_stage      Annual_Income: String numeric, 18.9 k uniques up to 109 k in top-10. Real incomes rarely exceed 1 M so bound set. Mechanical relation to monthly salary so fallback_formula = Monthly_Inhand_Salary*12; actual NaNs then median.
+21:31:14 INFO    run_stage      Monthly_Inhand_Salary: Float already but has NaNs. Logical formula Annual_Income/12 recovers >90 % of missing rows; residuals median-filled. Clip >20 k (max sample 15 k, p99 13.8 k).
+21:31:14 INFO    run_stage      Num_Bank_Accounts: Integer count; min −1 sentinel, max 1 798 but p99 445. Counts beyond 500 likely corruption; mark low/high outliers NaN then group-median by customer.
+21:31:14 INFO    run_stage  --- preprocessing ---
+21:31:14 INFO    run_stage    validation passed: True
+21:31:14 INFO    run_stage    attempt count: 2
+21:31:14 INFO    run_stage    feature columns (40): ['Age', 'Occupation', 'Annual_Income', 'Monthly_Inhand_Salary', 'Num_Bank_Accounts', 'Num_Credit_Card', 'Interest_Rate', 'Num_of_Loan', 'Delay_from_due_date', 'Num_of_Delayed_Payment', 'Changed_Credit_Limit', 'Num_Credit_Inquiries', 'Credit_Mix', 'Outstanding_Debt', 'Credit_History_Age']
+21:31:14 INFO    run_stage    class names: ['Good', 'Poor', 'Standard']
+21:31:14 INFO    run_stage    train/test split: 80000 / 20000 rows
+21:31:14 INFO    run_stage  --- feature-engineering ---
+21:31:14 INFO    run_stage    validation passed: True
+21:31:14 INFO    run_stage    attempt count: 1
+21:31:14 INFO    run_stage    hypothesis:
+21:31:14 INFO    run_stage      interactions_rationale: We engineered six domain-grounded interactions focusing on the highest-MI features per eda_insights (Total_EMI_per_month MI=0.5471; Monthly_Inhand_Salary MI=0.5187; Num_Credit_Inquiries MI=0.1114; Num_Credit_Card MI=0.1048; Delay-related features). EMI_to_Salary_Ratio fuses the top two MI features and, per exploratory_leads, is expected to exceed MI≈0.60. Savings_Rate captures residual cash after obligations. Inquiries_per_Credit_Card and Delay_Ratio normalize credit-seeking and payment discipline by exposure size. Interest_Burden and Balance_to_Salary_Ratio approximate interest cost and liquidity reserve. Ratios are stabilized (inf→NaN, median-imputed, clipped at p99/p1) to prevent outlier domination.
+21:31:14 INFO    run_stage      dropped_features_rationale: Dropped Month (not in top_discriminative_features) and Credit_Utilization_Ratio (MI=0.0) as low-information noise. No constant or high-correlation features were present.
+21:31:14 INFO    run_stage      expected_impact: These interactions should boost tree-model SHAP importance for EMI_to_Salary_Ratio into the top-5 and improve linear model separability by compressing distributions via log-transforms. Removing low-MI features reduces overfitting risk and speeds training.
+21:31:14 INFO    run_stage      eda_hypotheses_acted_on: ['exploratory_leads: Total_EMI_per_month/Monthly_Inhand_Salary ratio implemented', 'exploratory_leads: log-transforming Num_Credit_Inquiries and Total_EMI_per_month implemented', 'tested_predictions: missingness indicator for Type_of_Loan not implemented because one-hot dummies implicitly capture missing rows', 'tested_predictions: XGBoost vs Logistic Regression performance hypothesis is model-level and outside FE scope']
+21:31:14 INFO    run_stage    feature columns after FE: 40
+21:31:14 INFO    run_stage  --- train-models ---
+21:31:14 INFO    run_stage    logistic_regression: best_cv=0.6194 params={'model__C': 0.016400214911202308}
+21:31:14 INFO    run_stage    random_forest: best_cv=0.6719 params={'max_depth': 12, 'min_samples_split': 3}
+21:31:14 INFO    run_stage    xgboost: best_cv=0.6652 params={'max_depth': 6, 'learning_rate': 0.2521267904777921, 'subsample': 0.9896896099223678, 'colsample_bytree': 0.9425192044349383}
+21:31:14 INFO    run_stage    xgboost learning curve: 164 rounds, best=0.739152 at round 89, final=0.748351
+21:31:14 INFO    run_stage    logistic_regression: 10 trials, best=0.6194, worst=0.6178
+21:31:14 INFO    run_stage    random_forest: 10 trials, best=0.6719, worst=0.6603
+21:31:14 INFO    run_stage    xgboost: 10 trials, best=0.6652, worst=0.6579
+21:31:14 INFO    run_stage  --- evaluate + select-model ---
+21:31:14 INFO    run_stage    logistic_regression: macro_f1=0.6301 weighted_f1=0.6338 accuracy=0.6325
+21:31:14 INFO    run_stage      Good: P=0.490 R=0.797 F1=0.607 support=3694
+21:31:14 INFO    run_stage      Poor: P=0.594 R=0.712 F1=0.648 support=5726
+21:31:14 INFO    run_stage      Standard: P=0.789 R=0.532 F1=0.636 support=10580
+21:31:14 INFO    run_stage    random_forest: macro_f1=0.6824 weighted_f1=0.6873 accuracy=0.6862
+21:31:14 INFO    run_stage      Good: P=0.535 R=0.816 F1=0.646 support=3694
+21:31:14 INFO    run_stage      Poor: P=0.645 R=0.797 F1=0.713 support=5726
+21:31:14 INFO    run_stage      Standard: P=0.843 R=0.581 F1=0.688 support=10580
+21:31:14 INFO    run_stage    xgboost: macro_f1=0.6828 weighted_f1=0.6902 accuracy=0.6883
+21:31:14 INFO    run_stage      Good: P=0.539 R=0.792 F1=0.642 support=3694
+21:31:14 INFO    run_stage      Poor: P=0.657 R=0.773 F1=0.710 support=5726
+21:31:14 INFO    run_stage      Standard: P=0.819 R=0.606 F1=0.696 support=10580
+21:31:14 INFO    run_stage    selected model: xgboost
+21:31:14 INFO    run_stage    justification: XGBoost shows the highest overall accuracy (0.68825) and slightly higher macro_f1 (0.682823) compared to Random Forest (0.682417). It handles the 'Standard' class slightly better with a macro_f1 score of 0.696, which is important as this is the largest class by support. The weighted_f1 is also the highest for XGBoost, suggesting that it maintains strong performance across all classes. Additionally, XGBoost's CV score (0.6652) and test score show a smaller gap compared to Random Forest, indicating lower risk of overfitting.
+21:31:14 INFO    run_stage    global SHAP top-10:
+21:31:14 INFO    run_stage      Interest_Burden: 0.3984
+21:31:14 INFO    run_stage      Interest_Rate: 0.2007
+21:31:14 INFO    run_stage      Credit_Mix: 0.1796
+21:31:14 INFO    run_stage      Outstanding_Debt: 0.1669
+21:31:14 INFO    run_stage      Delay_from_due_date: 0.1537
+21:31:14 INFO    run_stage      Num_Credit_Card: 0.1350
+21:31:14 INFO    run_stage      Payment_of_Min_Amount: 0.1171
+21:31:14 INFO    run_stage      Changed_Credit_Limit: 0.1047
+21:31:14 INFO    run_stage      Num_Credit_Inquiries: 0.0758
+21:31:14 INFO    run_stage      Payment_Behaviour_Low_spent_Small_value_payments: 0.0682
+21:31:14 INFO    run_stage  --- inference + explain ---
+21:31:14 INFO    run_stage    prediction: Good (confidence 0.7066)
+21:31:14 INFO    run_stage    per-prediction SHAP top-10 for Good:
+21:31:14 INFO    run_stage      Interest_Rate: 0.2745 (toward)
+21:31:14 INFO    run_stage      Interest_Burden: 0.2109 (toward)
+21:31:14 INFO    run_stage      Payment_of_Min_Amount: 0.2063 (toward)
+21:31:14 INFO    run_stage      Credit_Mix: 0.1596 (toward)
+21:31:14 INFO    run_stage      Delay_from_due_date: 0.1436 (toward)
+21:31:14 INFO    run_stage      Annual_Income: 0.1122 (toward)
+21:31:14 INFO    run_stage      Total_EMI_per_month: -0.0641 (away_from)
+21:31:14 INFO    run_stage      Monthly_Balance: -0.0588 (away_from)
+21:31:14 INFO    run_stage      Num_Credit_Inquiries: 0.0572 (toward)
+21:31:14 INFO    run_stage      EMI_to_Salary_Ratio: -0.047 (away_from)
+21:31:14 INFO    run_stage    PDP positions:
+21:31:14 INFO    run_stage      Interest_Rate: value=8.0 grid_pct=20.0 pd={'Good': 0.2601, 'Poor': 0.2643, 'Standard': 0.4756}
+21:31:14 INFO    run_stage      Interest_Burden: value=43.856 grid_pct=4.1 pd={'Good': 0.2615, 'Poor': 0.2073, 'Standard': 0.5312}
+21:31:14 INFO    run_stage      Credit_Mix: value=2.0 grid_pct=100.0 pd={'Good': 0.3572, 'Poor': 0.4045, 'Standard': 0.2384}
+21:31:14 INFO    run_stage      Delay_from_due_date: value=8.0 grid_pct=10.2 pd={'Good': 0.2661, 'Poor': 0.3239, 'Standard': 0.41}
+21:31:14 INFO    run_stage    confidence diagnosis: low — confidence 0.71 is in line with typical correct-prediction confidence for Good
+21:31:14 INFO    run_stage    nearest casebook case: [representative] row=2405 true=Good pred=Good sim=0.999
+21:31:14 INFO    run_stage    risk_level: low, confidence_band: high
+21:31:14 INFO    run_stage    summary: The model flags this customer as low-risk Good because their moderate 8% interest rate, timely payment behavior, and diverse credit mix strongly support a Good outcome. Short payment delays and healthy annual income further tip the balance. The 71% confidence aligns with typical correct Good predictions, indicating reliable judgment. This profile closely matches a representative Good case in the casebook, suggesting familiar territory for the model.
+21:31:14 INFO    run_stage    action: standard_processing — Given the model’s low caution level, typical Good-class confidence, and match to a representative case, proceed with standard processing. No manual review is needed unless new adverse information emerges.
+21:31:14 INFO    run_stage  --- Token usage summary ---
+21:31:14 INFO    run_stage  Total LLM calls: 14
+21:31:14 INFO    run_stage  Total tokens: 282763 (input: 221619, output: 61144)
+21:31:14 INFO    run_stage  Total LLM duration: 583.33s
+21:31:14 INFO    run_stage    [dataset-policy-spec] model=gpt-4o in=4377 out=191 4.97s
+21:31:14 INFO    run_stage    [generate-eda-hypotheses] model=o4-mini in=3995 out=3824 42.47s
+21:31:14 INFO    run_stage    [column-transform-spec] model=o3 in=12836 out=9038 71.60s
+21:31:14 INFO    run_stage    [generate-preprocessing-code] model=gpt-4o in=17405 out=3593 35.26s
+21:31:14 INFO    run_stage    [repair-preprocessing-code] model=o4-mini in=12168 out=5353 54.40s
+21:31:14 INFO    run_stage    [audit-preprocessing] model=gpt-4o in=11765 out=186 6.64s
+21:31:14 INFO    run_stage    [generate-feature-engineering-code] model=o4-mini in=13000 out=10437 98.66s
+21:31:14 INFO    run_stage    [generate-feature-engineering-code] model=o4-mini in=13000 out=9714 115.36s
+21:31:14 INFO    run_stage    [reason-hyperparameter-grid] model=gpt-4o in=1427 out=315 7.04s
+21:31:14 INFO    run_stage    [generate-training-diagnostics] model=o4-mini in=7166 out=4084 42.58s
+21:31:14 INFO    run_stage    [reason-model-selection] model=gpt-4o in=2784 out=269 3.45s
+21:31:14 INFO    run_stage    [interpret-global-xai] model=o4-mini in=96096 out=3460 26.44s
+21:31:14 INFO    run_stage    [interpret-local-xai] model=o4-mini in=9738 out=6085 37.96s
+21:31:14 INFO    run_stage    [explain-risk] model=o4-mini in=15862 out=4595 36.50s
+21:31:14 INFO    run_stage  Full log saved to: /home/tough/BT5151 GroupProject/lab/logs/stage_full_20260415_185238.log

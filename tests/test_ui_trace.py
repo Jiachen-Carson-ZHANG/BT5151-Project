@@ -1,5 +1,6 @@
 """Tests for ui_trace pure log-parsing helpers."""
 
+import json
 from pathlib import Path
 
 
@@ -138,3 +139,88 @@ def test_build_trace_markdown_renders_node_cards(tmp_path):
     assert "train-models" in md
     assert "slow convergence" in md
     assert "3" in md  # total_llm_calls
+
+
+def test_parse_structured_trace_jsonl_builds_node_cards(tmp_path):
+    from bt5151_credit_risk.ui_trace import build_trace_markdown, parse_trace_artifact
+
+    trace_path = tmp_path / "trace_events_20260416_123000.jsonl"
+    trace_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "20260416_123000",
+                        "stage": "full",
+                        "event_type": "run_start",
+                    }
+                ),
+                json.dumps(
+                    {
+                        "run_id": "20260416_123000",
+                        "stage": "full",
+                        "event_type": "node_complete",
+                        "node": "train-models",
+                        "status": "warn",
+                        "state_keys_written": ["trained_models", "selected_model_name"],
+                        "warnings": ["fold skipped"],
+                        "metrics": {"evaluation_results.xgboost.macro_f1": 0.6943},
+                        "artifacts": {"trace_path": "/tmp/trace_events_20260416_123000.jsonl"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trace = parse_trace_artifact(trace_path)
+    md = build_trace_markdown(trace)
+
+    assert trace["run_summary"]["artifact_type"] == "structured_trace"
+    assert trace["run_summary"]["run_id"] == "20260416_123000"
+    assert trace["run_summary"]["stage"] == "full"
+    assert trace["run_summary"]["total_events"] == 2
+    assert any(card["node_name"] == "train-models" and card["status"] == "warn" for card in trace["cards"])
+    assert "State keys written" in md
+    assert "structured trace" in md.lower()
+
+
+def test_parse_structured_trace_jsonl_includes_lifecycle_events(tmp_path):
+    from bt5151_credit_risk.ui_trace import build_trace_markdown, parse_trace_artifact
+
+    trace_path = tmp_path / "trace_events_20260416_123500.jsonl"
+    trace_path.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "run_id": "20260416_123500",
+                        "stage": "full",
+                        "event_type": "run_complete",
+                        "status": "pass",
+                        "metrics": {"macro_f1": 0.6943},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "run_id": "20260416_123500",
+                        "stage": "full",
+                        "event_type": "cache_saved",
+                        "status": "pass",
+                        "artifacts": {"cache_trace_path": "/tmp/trace_events_20260416_123500.jsonl"},
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    trace = parse_trace_artifact(trace_path)
+    md = build_trace_markdown(trace)
+
+    assert any(card["node_name"] == "run_complete" for card in trace["cards"])
+    assert any(card["node_name"] == "cache_saved" for card in trace["cards"])
+    assert "Lifecycle event: run_complete" in md
+    assert "Lifecycle event: cache_saved" in md

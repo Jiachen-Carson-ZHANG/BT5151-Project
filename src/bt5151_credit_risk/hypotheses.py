@@ -37,6 +37,7 @@ def interpret_global_xai(
     training_diagnostics: dict | None = None,
     eda_hypotheses: dict | None = None,
     feature_engineering_hypothesis: dict | None = None,
+    shortcut_audit: dict | None = None,
 ) -> dict:
     """LLM interprets global XAI (SHAP/PFI/PDP/ALE) into consensus + insights + hypotheses."""
     system_prompt = load_skill_prompt("interpret-global-xai")
@@ -50,6 +51,8 @@ def interpret_global_xai(
         payload["eda_hypotheses"] = eda_hypotheses
     if feature_engineering_hypothesis:
         payload["feature_engineering_hypothesis"] = feature_engineering_hypothesis
+    if shortcut_audit:
+        payload["shortcut_audit"] = shortcut_audit
     return call_json_response(system_prompt, payload, caller="interpret-global-xai")
 
 

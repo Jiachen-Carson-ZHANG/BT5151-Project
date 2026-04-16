@@ -28,7 +28,7 @@ def test_generate_feature_engineering_prompt_makes_ordering_unambiguous():
     prompt = load_skill_prompt("generate-feature-engineering-code")
 
     assert "EDA hypotheses are prioritized ideas, not directives" in prompt
-    assert "Build interaction features from raw values first" in prompt
+    assert "Build interaction features" in prompt
     assert "linear_view" in prompt
     assert "tree_view" in prompt
     assert "view_metadata.json" in prompt
@@ -125,6 +125,26 @@ def test_generate_feature_engineering_prompt_enforces_ratio_stability():
     prompt = load_skill_prompt("generate-feature-engineering-code")
     assert "Engineered ratios must be stabilized" in prompt
     assert "train_ratio.quantile(0.99)" in prompt
+
+
+def test_generate_feature_engineering_prompt_protects_top_mi_from_correlation_drop():
+    """Top-5 MI features must be protected from the |r|>0.95 correlation drop rule.
+
+    Monthly_Inhand_Salary (MI=0.5187, #2 feature) was dropped in run 013 because
+    its correlation with Annual_Income exceeded 0.95 after Annual_Income/12 imputation.
+    The skill must explicitly block this.
+    """
+    prompt = load_skill_prompt("generate-feature-engineering-code")
+    # Rule: when |r|>0.95, keep the higher-MI feature, not the higher-variance feature.
+    # Never drop a top-5 MI raw feature in favor of a lower-MI proxy.
+    assert ("higher-MI feature" in prompt or "higher MI" in prompt), \
+        "Prompt must state higher-MI feature wins over higher-variance when resolving |r|>0.95 pairs"
+    assert (
+        "top-5 MI" in prompt
+        or "top-5 by mutual information" in prompt
+        or "NEVER drop a top-5 MI" in prompt
+        or "NEVER drop a feature that ranks in the top" in prompt
+    ), "Prompt must protect top-5 MI raw features from the correlation drop rule"
 
 
 def test_deferred_encoding_contract_across_three_skills():

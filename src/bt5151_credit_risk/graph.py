@@ -33,6 +33,7 @@ from bt5151_credit_risk.feature_engineering import (
     validate_feature_engineering_output,
 )
 from bt5151_credit_risk.preprocess import cleanup_old_workspaces
+from bt5151_credit_risk.shortcut_audit import run_shortcut_audit
 from bt5151_credit_risk.preprocess import execute_generated_preprocessing
 from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
@@ -320,11 +321,17 @@ def validate_preprocessing_output_node(state: CreditRiskState):
             logger.warning("    role violation: [%s] %s (role=%s) — %s",
                            v.get("violation"), v.get("column"), v.get("declared_role"),
                            v.get("likely_cause"))
+    if validation_report.get("cross_field_violations"):
+        for v in validation_report["cross_field_violations"]:
+            logger.warning("    invariant violation: [%s] %s — %s",
+                           v.get("violation"), v.get("column"), v.get("likely_cause"))
 
     # Capability-ceiling escalation: if the same (column, violation) pair appears in
     # this attempt AND the previous one, the repair model is not acting on the contract.
     # Flag escalation so the next repair call routes to a stronger model.
-    current_violations = validation_report.get("role_violations") or []
+    current_violations = (validation_report.get("role_violations") or []) + (
+        validation_report.get("cross_field_violations") or []
+    )
     current_sig = {(v.get("column"), v.get("violation")) for v in current_violations}
     previous_violations = state.preprocessing_last_role_violations or []
     previous_sig = {(v.get("column"), v.get("violation")) for v in previous_violations}
@@ -349,6 +356,40 @@ def validate_preprocessing_output_node(state: CreditRiskState):
     target_frame = pd.read_csv(artifacts["target.csv"])
     target_series = target_frame.iloc[:, 0]
 
+    # --- Deterministic MNAR missing-indicator injection ---
+    # The LLM may not add {col}_missing for MNAR multi-value-set columns. Instead of
+    # relying on prompt guidance, we inject it here from the multi-hot expansion itself:
+    # a row where ALL multi-hot indicators for a column are 0 was originally missing/empty.
+    mnar_suspects = (state.eda_report or {}).get("missing_patterns", {}).get("mnar_suspects", [])
+    _injected_mnar: list[str] = []
+    for entry in mnar_suspects:
+        col = entry["column"]
+        missing_col = f"{col}_missing"
+        if missing_col in feature_frame.columns:
+            continue  # already present — LLM handled it
+        # Find multi-hot expansion columns for this MNAR column
+        prefix = col + "_"
+        multihot_cols = [c for c in feature_frame.columns if c.startswith(prefix)]
+        if multihot_cols:
+            # All-zero row = original value was missing/empty
+            feature_frame[missing_col] = (feature_frame[multihot_cols].sum(axis=1) == 0).astype(int)
+            _injected_mnar.append(missing_col)
+            logger.info(
+                "    MNAR inject: added %s (%.1f%% flagged as missing, from %d multi-hot cols)",
+                missing_col,
+                feature_frame[missing_col].mean() * 100,
+                len(multihot_cols),
+            )
+    if _injected_mnar:
+        # Write the updated feature frame back so FE sees the new column
+        feature_frame.to_csv(artifacts["feature_frame.csv"], index=False)
+
+    # --- Record deferred categorical columns (object-dtype) for FE identity check ---
+    deferred_categorical_columns = {
+        col: int(feature_frame[col].nunique())
+        for col in feature_frame.select_dtypes(include="object").columns
+    }
+
     logger.info("    feature_frame: %d rows x %d cols", len(feature_frame), len(feature_frame.columns))
     # Sort labels so the encoded class mapping stays stable across runs.
     class_names = sorted(pd.Series(target_series.dropna()).astype(str).unique())
@@ -369,7 +410,7 @@ def validate_preprocessing_output_node(state: CreditRiskState):
     raw_frame_for_policy = None
     if (group_column or time_column) and state.preprocessing_raw_frame_path:
         try:
-            raw_frame_for_policy = pd.read_csv(state.preprocessing_raw_frame_path)
+            raw_frame_for_policy = pd.read_csv(state.preprocessing_raw_frame_path, low_memory=False)
         except Exception as exc:
             logger.warning("    could not reload raw frame for validation-policy metadata: %s", exc)
 
@@ -398,6 +439,7 @@ def validate_preprocessing_output_node(state: CreditRiskState):
         "train_time_values": train_time_values,
         "test_time_values": test_time_values,
         "feature_columns": feature_frame.columns.tolist(),
+        "deferred_categorical_columns": deferred_categorical_columns,
         "class_names": class_names,
         "label_to_id": label_to_id,
         "id_to_label": id_to_label,
@@ -569,11 +611,18 @@ def execute_feature_engineering_node(state: CreditRiskState):
 def validate_feature_engineering_node(state: CreditRiskState):
     logger.info(">>> validate-feature-engineering")
     execution_result = state.feature_engineering_execution_log or {}
+    # Extract top-5 MI raw feature names for the drop-protection validator.
+    _top_mi = None
+    if state.eda_report and state.eda_report.get("top_discriminative_features"):
+        _top_mi = [f["column"] for f in state.eda_report["top_discriminative_features"][:5]]
     validation_report = validate_feature_engineering_output(
         execution_result,
         original_train_rows=len(state.train_frame),
         original_test_rows=len(state.test_frame),
         original_feature_count=len(state.feature_columns),
+        deferred_categoricals=state.deferred_categorical_columns,
+        top_mi_features=_top_mi,
+        train_frame_pre_fe=state.train_frame,
     )
     logger.info("    validation passed: %s, checks: %s", validation_report.get("passed"), validation_report.get("checks"))
     if validation_report.get("errors"):
@@ -694,25 +743,53 @@ def train_models_node(state: CreditRiskState):
 
     # Step 1: Quick baseline via cross-validation on training data only.
     # Never touch test_frame here — baseline metrics feed the LLM grid reasoner.
+    # IMPORTANT: use the same grouped/temporal policy as tuning so the LLM sees
+    # realistic (not inflated) scores when it reasons about hyperparameter grids.
     from sklearn.metrics import f1_score
-    from sklearn.model_selection import cross_val_score, StratifiedKFold
+    from bt5151_credit_risk.train import _build_cv_splits, _normalize_validation_policy
     baseline_metrics = {}
-    min_class_size = int(state.train_target.value_counts().min())
-    if min_class_size >= 2:
-        n_splits = min(3, min_class_size)
-        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
+    _policy = _normalize_validation_policy(
+        validation_policy=validation_policy,
+        group_values=state.train_group_values,
+        time_values=state.train_time_values,
+    )
+    _splits = _build_cv_splits(
+        state.train_target,
+        _policy,
+        group_values=state.train_group_values,
+        n_splits=3,
+    )
+    if _splits:
+        import sklearn.base
+        _n_splits = len(_splits)
+        _all_classes = set(state.train_target.unique())
         for model_name, model in models.items():
             train_view = _get_train_frame_for_model(state, model_name)
-            scores = cross_val_score(
-                model, train_view, state.train_target,
-                cv=cv, scoring="f1_macro", n_jobs=-1,
-            )
-            baseline_metrics[model_name] = {
-                "macro_f1": round(float(scores.mean()), 4),
-            }
-        logger.info("    baseline metrics (%d-fold CV on train): %s", n_splits, baseline_metrics)
+            _fold_scores = []
+            for tr_idx, val_idx in _splits:
+                # Skip folds where a class is absent from train or val — can happen
+                # on small datasets with strict group constraints.
+                _tr_classes = set(state.train_target.iloc[tr_idx].unique())
+                _val_classes = set(state.train_target.iloc[val_idx].unique())
+                if not (_all_classes <= _tr_classes and _val_classes <= _tr_classes):
+                    continue
+                try:
+                    _m = sklearn.base.clone(model)
+                    _m.fit(train_view.iloc[tr_idx], state.train_target.iloc[tr_idx])
+                    _preds = _m.predict(train_view.iloc[val_idx])
+                    _fold_scores.append(f1_score(state.train_target.iloc[val_idx], _preds, average="macro"))
+                except Exception as exc:
+                    logger.warning("    baseline fold skipped (%s): %s", model_name, exc)
+            if _fold_scores:
+                baseline_metrics[model_name] = {
+                    "macro_f1": round(float(np.mean(_fold_scores)), 4),
+                }
+        logger.info(
+            "    baseline metrics (%d-fold %s CV on train): %s",
+            _n_splits, _policy["type"], baseline_metrics,
+        )
     else:
-        logger.warning("    skipping baseline CV — rarest class has only %d sample(s)", min_class_size)
+        logger.warning("    skipping baseline CV — could not build splits")
 
     # Step 2: LLM reasons hyperparameter grids.
     class_distribution = {}
@@ -939,7 +1016,14 @@ def select_model_node(state: CreditRiskState):
         fe_hypothesis=state.feature_engineering_hypothesis,
         class_names=state.class_names,
     )
-    selected_name = selection["model_name"]
+    advisory_model_name = selection.get("llm_model_name", selection.get("model_name"))
+    selected_name = best_model_name
+    if advisory_model_name and advisory_model_name != best_model_name:
+        logger.warning(
+            "    advisory LLM model_name=%s ignored; choose_best_model() selected %s",
+            advisory_model_name,
+            best_model_name,
+        )
     logger.info("    selected: %s", selected_name)
     logger.info("    justification: %s", selection.get("justification", ""))
     if selection.get("hypothesis_validation"):
@@ -1092,6 +1176,56 @@ def local_xai_node(state: CreditRiskState):
     return {"local_xai_cases": cases}
 
 
+# Deterministic shortcut-feature audit: detect SHAP/PFI divergence, dominance, or
+# calendar/index shortcuts in the top-ranked features. Run capped ablation (max 2)
+# on the selected model using zero-out on the test view. Writes shortcut_audit.json.
+def shortcut_audit_node(state: CreditRiskState):
+    logger.info(">>> shortcut-feature-audit")
+    model = state.trained_models[state.selected_model_name]
+    model_name = state.selected_model_name
+    test_view = _get_test_frame_for_model(state, model_name)
+
+    shap_importance = state.global_shap_importance or []
+    pfi_grouped = (state.global_xai_results or {}).get("pfi", {}).get("grouped", [])
+
+    if not shap_importance or not pfi_grouped:
+        logger.info("    skip: shap_importance or pfi_grouped missing")
+        return {"shortcut_audit": {"suspects": [], "ablations": [], "skipped": True}}
+
+    audit = run_shortcut_audit(
+        model=model,
+        test_view=test_view,
+        y_test=state.test_target,
+        shap_importance=shap_importance,
+        pfi_grouped=pfi_grouped,
+        class_names=state.class_names,
+        max_ablations=2,
+    )
+
+    for s in audit["suspects"]:
+        logger.info("    suspect: %s signals=%s shap_rank=%s pfi_rank=%s share=%.3f",
+                     s["feature"], s["signals"], s["shap_rank"], s["pfi_rank"], s["shap_share"])
+    for a in audit["ablations"]:
+        logger.info("    ablation: %s verdict=%s Δmacro_f1=%s",
+                     a["feature"], a["verdict"], a.get("delta_macro_f1"))
+
+    # Persist artifact alongside analysis bundle (reuse preprocessing workspace if no explicit run dir)
+    artifact_dir = None
+    if state.preprocessing_workspace:
+        from pathlib import Path as _Path
+        artifact_dir = _Path(state.preprocessing_workspace)
+    if artifact_dir is not None and artifact_dir.exists():
+        try:
+            (artifact_dir / "shortcut_audit.json").write_text(
+                json.dumps(audit, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception as exc:  # pragma: no cover
+            logger.warning("    failed to write shortcut_audit.json: %s", exc)
+
+    return {"shortcut_audit": audit}
+
+
 # LLM interprets GLOBAL XAI evidence (SHAP/PFI/PDP/ALE) — model-level patterns only.
 def interpret_global_xai_node(state: CreditRiskState):
     logger.info(">>> interpret-global-xai")
@@ -1102,6 +1236,7 @@ def interpret_global_xai_node(state: CreditRiskState):
         training_diagnostics=state.training_diagnostics,
         eda_hypotheses=state.eda_hypotheses,
         feature_engineering_hypothesis=state.feature_engineering_hypothesis,
+        shortcut_audit=state.shortcut_audit,
     )
 
     for obs in (interpretation.get("observations") or [])[:3]:
@@ -1171,7 +1306,13 @@ def package_analysis_bundle_node(state: CreditRiskState):
             "selected_model_view": _get_model_view_name(state, state.selected_model_name),
             "class_names": state.class_names,
             "feature_count": len(_get_feature_columns_for_model(state, state.selected_model_name) or []),
-            "dataset_hash": hashlib.md5(str(state.raw_dataset_path).encode()).hexdigest()[:8],
+            "dataset_hash": (
+                hashlib.md5(
+                    open(state.raw_dataset_path, "rb").read(8192)
+                ).hexdigest()[:8]
+                if state.raw_dataset_path and Path(state.raw_dataset_path).exists()
+                else hashlib.md5(str(state.raw_dataset_path).encode()).hexdigest()[:8]
+            ),
         },
         "eda_hypotheses": state.eda_hypotheses,
         "training_diagnostics": state.training_diagnostics,
@@ -1502,6 +1643,7 @@ def build_graph():
     graph.add_node("select-model", select_model_node)
     graph.add_node("global-xai", global_xai_node)
     graph.add_node("local-xai", local_xai_node)
+    graph.add_node("shortcut-feature-audit", shortcut_audit_node)
     graph.add_node("interpret-global-xai", interpret_global_xai_node)
     graph.add_node("interpret-local-xai", interpret_local_xai_node)
     graph.add_node("package-analysis-bundle", package_analysis_bundle_node)
@@ -1558,7 +1700,8 @@ def build_graph():
     graph.add_edge("training-diagnostics", "select-model")
     graph.add_edge("select-model", "global-xai")
     graph.add_edge("global-xai", "local-xai")
-    graph.add_edge("local-xai", "interpret-global-xai")
+    graph.add_edge("local-xai", "shortcut-feature-audit")
+    graph.add_edge("shortcut-feature-audit", "interpret-global-xai")
     graph.add_edge("interpret-global-xai", "interpret-local-xai")
     graph.add_edge("interpret-local-xai", "package-analysis-bundle")
     graph.add_edge("package-analysis-bundle", "run-inference")

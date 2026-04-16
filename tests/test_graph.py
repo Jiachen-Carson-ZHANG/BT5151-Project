@@ -128,6 +128,7 @@ def test_graph_contains_required_nodes():
         "select-model",
         "global-xai",
         "local-xai",
+        "shortcut-feature-audit",
         "interpret-global-xai",
         "interpret-local-xai",
         "package-analysis-bundle",
@@ -242,6 +243,12 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
             "    test_df.to_csv(workspace_path / 'engineered_test.csv', index=False)\n"
             "    report = {'dropped': [], 'transformed': [], 'added': []}\n"
             "    (workspace_path / 'feature_engineering_report.json').write_text(json.dumps(report))\n"
+            "    lineage = {\n"
+            "        'derived_features': [],\n"
+            "        'dropped_features': [],\n"
+            "        'passthrough_features': list(train_df.columns),\n"
+            "    }\n"
+            "    (workspace_path / 'feature_lineage.json').write_text(json.dumps(lineage))\n"
         )
         return {"code": code, "entrypoint": "engineer_features"}
 
@@ -455,9 +462,8 @@ def _build_select_model_state(trained_models, test_frame, test_target, feature_c
     )
 
 
-def test_select_model_recomputes_shap_when_llm_picks_different_model(monkeypatch):
-    """When the LLM selects a model different from metric-best, SHAP must be
-    recomputed for the selected model via compute_global_shap."""
+def test_select_model_ignores_llm_override_and_keeps_metric_best(monkeypatch):
+    """The metric-best model must remain authoritative even if the LLM disagrees."""
     rng = np.random.RandomState(42)
     n = 50
     X = pd.DataFrame({"f1": rng.randn(n), "f2": rng.randn(n)})
@@ -474,7 +480,7 @@ def test_select_model_recomputes_shap_when_llm_picks_different_model(monkeypatch
         feature_columns=["f1", "f2"], class_names=["c0", "c1"],
     )
 
-    # LLM selects xgboost (not the metric-best random_forest)
+    # LLM tries to select xgboost (not the metric-best random_forest)
     def fake_reason_model_selection(**kwargs):
         return {"model_name": "xgboost", "justification": "test override"}
 
@@ -490,11 +496,12 @@ def test_select_model_recomputes_shap_when_llm_picks_different_model(monkeypatch
 
     result = select_model_node(state)
 
-    assert result["selected_model_name"] == "xgboost"
-    # compute_global_shap must have been called for "xgboost" (the selected model)
-    assert "xgboost" in recompute_calls, (
-        f"Expected SHAP recomputation for 'xgboost', got calls for: {recompute_calls}"
+    assert result["selected_model_name"] == "random_forest"
+    assert "test override" in result["selection_justification"]
+    assert "xgboost" not in recompute_calls, (
+        f"LLM override should not control SHAP recomputation, got calls for: {recompute_calls}"
     )
+    assert "random_forest" in recompute_calls
     assert len(result["global_shap_importance"]) > 0
 
 

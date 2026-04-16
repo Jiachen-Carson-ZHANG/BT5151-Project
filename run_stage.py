@@ -23,6 +23,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from bt5151_credit_risk.llm import get_usage_summary, reset_usage_log
+from bt5151_credit_risk.trace_events import (
+    append_trace_event,
+    build_trace_event_path,
+    summarize_node_update,
+)
 
 LOG_DIR = Path(__file__).resolve().parent / "lab" / "logs"
 
@@ -67,7 +72,7 @@ def setup_logging(stage: str, run_id: str):
     return log_file
 
 
-def run_stage(logger, stage: str, row_index: int, run_id: str):
+def run_stage(logger, stage: str, row_index: int, run_id: str, trace_path: Path | None = None):
     from bt5151_credit_risk.graph import build_graph
 
     stop_after = STAGE_STOP_AFTER[stage]
@@ -88,14 +93,46 @@ def run_stage(logger, stage: str, row_index: int, run_id: str):
         "inference_input": {"row_index": row_index},
     }
 
+    if trace_path is not None:
+        append_trace_event(
+            trace_path,
+            {
+                "run_id": run_id,
+                "stage": stage,
+                "event_type": "run_start",
+                "status": "pass",
+                "node": "__run__",
+                "state_keys_written": sorted(input_data.keys()),
+                "artifacts": {
+                    "log_path": str(LOG_DIR / f"stage_{stage}_{run_id}.log"),
+                    "trace_path": str(trace_path),
+                },
+            },
+        )
+
     try:
-        if stop_after is None:
-            # Full run — use invoke directly.
-            result = compiled.invoke(input_data)
-        else:
-            # Partial run — stream node outputs and stop after target node.
-            result = _stream_until(compiled, input_data, stop_after, logger)
-    except Exception:
+        result = _stream_until(
+            compiled,
+            input_data,
+            stop_after,
+            logger,
+            trace_path=trace_path,
+            run_id=run_id,
+            stage=stage,
+        )
+    except Exception as exc:
+        if trace_path is not None:
+            append_trace_event(
+                trace_path,
+                {
+                    "run_id": run_id,
+                    "stage": stage,
+                    "event_type": "run_failed",
+                    "status": "fail",
+                    "node": "__run__",
+                    "error": str(exc)[:500],
+                },
+            )
         logger.exception("Pipeline failed at stage '%s'", stage)
         return None
 
@@ -104,10 +141,63 @@ def run_stage(logger, stage: str, row_index: int, run_id: str):
 
     # Log outputs for all stages that ran (cumulative).
     _log_outputs(logger, stage, result)
+    if trace_path is not None:
+        append_trace_event(
+            trace_path,
+            {
+                "run_id": run_id,
+                "stage": stage,
+                "event_type": "run_complete",
+                "status": "pass",
+                "node": "__run__",
+                "elapsed_s": round(elapsed, 3),
+                "state_keys_written": sorted(result.keys()) if isinstance(result, dict) else [],
+                "artifacts": {
+                    "trace_path": str(trace_path),
+                },
+            },
+        )
     return result
 
 
-def _stream_until(compiled, input_data, stop_after, logger):
+def _finalize_successful_run(logger, stage: str, run_id: str, result: dict, metadata: dict, save_cache_flag: bool, trace_path: Path) -> None:
+    """Persist post-run artifacts without letting optional failures stall terminal status."""
+    if save_cache_flag:
+        try:
+            from bt5151_credit_risk.cache import save_cache
+
+            # Stamp run_id and trace/log paths into the state before pickling so the
+            # Gradio app can display them. These are orchestration fields that run_stage
+            # controls and the graph nodes don't set.
+            result.setdefault("run_id", run_id)
+            result.setdefault("cache_trace_path", str(trace_path) if trace_path and trace_path.is_file() else None)
+            result.setdefault("cache_log_path", str(metadata.get("log_path", "")))
+
+            cache_path = save_cache(result, metadata=metadata)
+        except Exception as exc:
+            logger.exception("Pipeline cache save failed for run_id=%s: %s", run_id, exc)
+        else:
+            try:
+                append_trace_event(
+                    trace_path,
+                    {
+                        "run_id": run_id,
+                        "stage": stage,
+                        "event_type": "cache_saved",
+                        "status": "pass",
+                        "node": "__run__",
+                        "artifacts": {
+                            "cache_path": str(cache_path),
+                        },
+                    },
+                )
+            except Exception as exc:
+                logger.exception("Failed to append cache_saved trace event for run_id=%s: %s", run_id, exc)
+            else:
+                logger.info("Pipeline cache saved → %s (launch app.py to use it)", cache_path)
+
+
+def _stream_until(compiled, input_data, stop_after, logger, trace_path: Path | None = None, run_id: str | None = None, stage: str | None = None):
     """Stream node-by-node, accumulating state updates, stop after target node."""
     accumulated = dict(input_data)
     for event in compiled.stream(input_data, stream_mode="updates"):
@@ -115,6 +205,16 @@ def _stream_until(compiled, input_data, stop_after, logger):
         for node_name, update in event.items():
             if isinstance(update, dict):
                 accumulated.update(update)
+                if trace_path is not None:
+                    append_trace_event(
+                        trace_path,
+                        summarize_node_update(
+                            node_name,
+                            update,
+                            run_id=run_id,
+                            stage=stage,
+                        ),
+                    )
         if stop_after in event:
             logger.info("    [stream] reached stop node '%s', halting", stop_after)
             break
@@ -344,9 +444,11 @@ def _build_provenance_metadata(run_id: str, log_file: Path) -> dict:
     from datetime import timezone
 
     bundle_path = LOG_DIR / f"analysis_bundle_{run_id}.json"
+    trace_path = build_trace_event_path(LOG_DIR, run_id)
     return {
         "cache_log_path": str(log_file),
         "cache_bundle_path": str(bundle_path),
+        "cache_trace_path": str(trace_path),
         "cache_saved_at": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -372,6 +474,7 @@ def main():
 
     # Write active run status so the app can poll progress.
     metadata = _build_provenance_metadata(run_id, log_file)
+    trace_path = Path(metadata["cache_trace_path"])
     from bt5151_credit_risk.run_status import (
         mark_run_completed,
         mark_run_failed,
@@ -383,25 +486,41 @@ def main():
         row_index=row_index,
         log_path=metadata["cache_log_path"],
         bundle_path=metadata["cache_bundle_path"],
+        trace_path=metadata["cache_trace_path"],
     )
 
     reset_usage_log()
     result = None
     try:
-        result = run_stage(logger, stage, row_index, run_id)
+        result = run_stage(logger, stage, row_index, run_id, trace_path=trace_path)
     except Exception as exc:
         mark_run_failed(run_id, error=str(exc)[:200])
         raise
 
-    print_usage(logger)
-    logger.info("Full log saved to: %s", log_file)
+    # run_stage() catches its own exceptions and returns None on failure.
+    # The outer except above only fires for exceptions that escape run_stage()
+    # (currently none), so we must also handle the None-return case explicitly.
+    if result is None:
+        mark_run_failed(run_id, error="Pipeline returned no result — check log for exception details")
+        logger.error("Full log saved to: %s", log_file)
+        sys.exit(1)
 
-    if save_cache_flag and result is not None:
-        from bt5151_credit_risk.cache import save_cache
-        cache_path = save_cache(result, metadata=metadata)
-        logger.info("Pipeline cache saved → %s (launch app.py to use it)", cache_path)
-
-    mark_run_completed(run_id)
+    try:
+        print_usage(logger)
+        logger.info("Full log saved to: %s", log_file)
+        _finalize_successful_run(
+            logger,
+            stage,
+            run_id,
+            result,
+            metadata,
+            save_cache_flag,
+            trace_path,
+        )
+    finally:
+        # The pipeline itself succeeded, so the run should never remain "running"
+        # just because an optional post-run artifact step had issues.
+        mark_run_completed(run_id)
 
 
 if __name__ == "__main__":

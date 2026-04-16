@@ -5,6 +5,7 @@ Does NOT test Gradio rendering — only callback logic.
 """
 
 import os
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -50,6 +51,7 @@ def _mock_state():
     state.eda_hypotheses = None
     state.full_feature_frame = _make_raw_frame()
     state.full_feature_frames_by_view = None
+    state.cache_trace_path = "/tmp/trace_events_20260416_120000.jsonl"
     state.cache_log_path = "/tmp/stage_full_20260416_120000.log"
     state.cache_bundle_path = "/tmp/analysis_bundle_20260416_120000.json"
     state.run_id = "20260416_120000"
@@ -69,6 +71,19 @@ def _make_raw_frame():
 # Task 5: Cold-start path
 # ---------------------------------------------------------------------------
 class TestColdStart:
+    def test_build_app_constructs_under_current_gradio(self):
+        """build_app() should construct without Gradio constructor errors."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        with patch.object(app_mod, "_get_state", return_value=_mock_state()):
+            demo = app_mod.build_app()
+
+        assert demo is not None
+
     def test_cb_predict_returns_no_cache_message_when_state_is_none(self):
         """cb_predict must not crash when no cache is loaded."""
         import importlib
@@ -240,6 +255,43 @@ class TestModelEvidence:
         # It can be None if matplotlib not available, but not an exception
         assert result is not None
 
+    def test_cb_model_overview_handles_nested_hypothesis_validation_dict(self):
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        state = _mock_state()
+        state.training_diagnostics = {
+            "hypothesis_validation": {
+                "tested": [
+                    {
+                        "original": "XGBoost will win",
+                        "outcome": "confirmed",
+                        "actual": "macro_f1=0.69",
+                    }
+                ],
+                "supported": [
+                    {
+                        "original": "Standard recall will lag",
+                        "status": "weak_evidence",
+                        "evidence": "recall=0.61",
+                    }
+                ],
+            }
+        }
+
+        with patch.object(app_mod, "_get_state", return_value=state):
+            result = app_mod.cb_model_overview()
+
+        hyp_md = result[4]
+        assert "tier" in hyp_md
+        assert "tested" in hyp_md
+        assert "supported" in hyp_md
+        assert "XGBoost will win" in hyp_md
+        assert "Standard recall will lag" in hyp_md
+
     def test_cb_model_overview_returns_no_cache_df_when_state_none(self):
         import importlib
 
@@ -257,17 +309,37 @@ class TestModelEvidence:
 # Task 8: Developer Trace — cb_developer_trace callback behavior
 # ---------------------------------------------------------------------------
 class TestDeveloperTrace:
-    def test_cb_developer_trace_uses_active_run_log_when_alive(self, tmp_path, monkeypatch):
-        """cb_developer_trace must use active_run.log_path when PID is alive."""
+    def test_cb_developer_trace_uses_active_run_trace_when_alive(self, tmp_path, monkeypatch):
+        """cb_developer_trace must use active_run.trace_path when PID is alive."""
         import importlib
 
         import app as app_mod
 
         importlib.reload(app_mod)
 
-        bound_log = tmp_path / "stage_full_20260416_120000.log"
-        bound_log.write_text(
-            "12:00:00 INFO    bt5151_credit_risk.graph  >>> train-models\n",
+        active_trace = tmp_path / "trace_events_20260416_120000.jsonl"
+        active_trace.write_text(
+            "\n".join(
+                [
+                    json.dumps({"run_id": "20260416_120000", "stage": "full", "event_type": "run_start"}),
+                    json.dumps(
+                        {
+                            "run_id": "20260416_120000",
+                            "stage": "full",
+                            "event_type": "node_complete",
+                            "node": "train-models",
+                            "status": "pass",
+                            "state_keys_written": ["trained_models"],
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raw_log = tmp_path / "stage_full_20260416_120000.log"
+        raw_log.write_text(
+            "12:00:00 INFO    bt5151_credit_risk.graph  >>> evaluate-models\n",
             encoding="utf-8",
         )
 
@@ -276,7 +348,8 @@ class TestDeveloperTrace:
             "status": "running",
             "pid": os.getpid(),
             "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
-            "log_path": str(bound_log),
+            "log_path": str(raw_log),
+            "trace_path": str(active_trace),
             "bundle_path": "/tmp/bundle.json",
         }
 
@@ -286,23 +359,154 @@ class TestDeveloperTrace:
 
         assert "20260416_120000" in result
         assert "train-models" in result
+        assert "evaluate-models" not in result
 
-    def test_cb_developer_trace_falls_back_to_cache_log_when_no_active_run(self, tmp_path, monkeypatch):
-        """cb_developer_trace must use state.cache_log_path when no active run."""
+    def test_cb_developer_trace_uses_active_run_trace_when_failed(self, tmp_path, monkeypatch):
+        """Failed active runs should still render their own trace artifact."""
         import importlib
 
         import app as app_mod
 
         importlib.reload(app_mod)
 
-        cache_log = tmp_path / "stage_full_cached.log"
-        cache_log.write_text(
-            "12:00:00 INFO    bt5151_credit_risk.graph  >>> evaluate-models\n",
+        failed_trace = tmp_path / "trace_events_failed.jsonl"
+        failed_trace.write_text(
+            "\n".join(
+                [
+                    json.dumps({"run_id": "20260416_120000", "stage": "full", "event_type": "run_failed", "status": "fail"}),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        cached_trace = tmp_path / "trace_events_cached.jsonl"
+        cached_trace.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_999999",
+                    "stage": "full",
+                    "event_type": "cache_saved",
+                    "status": "pass",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260416_120000",
+            "status": "failed",
+            "pid": os.getpid(),
+            "pid_start_time": 0.0,
+            "log_path": str(tmp_path / "stage_full_failed.log"),
+            "trace_path": str(failed_trace),
+            "bundle_path": "/tmp/bundle.json",
+        }
+
+        state = _mock_state()
+        state.cache_trace_path = str(cached_trace)
+        state.cache_log_path = str(tmp_path / "stage_cached.log")
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+
+        result = app_mod.cb_developer_trace(state=state)
+
+        assert "run_failed" in result
+        assert "20260416_999999" not in result
+
+    def test_cb_developer_trace_falls_back_to_active_run_log_when_trace_missing(self, tmp_path, monkeypatch):
+        """If the trace artifact is missing, cb_developer_trace should fall back to the raw log."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        raw_log = tmp_path / "stage_full_20260416_120000.log"
+        raw_log.write_text(
+            "12:00:00 INFO    bt5151_credit_risk.graph  >>> train-models\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260416_120000",
+            "status": "running",
+            "pid": os.getpid(),
+            "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
+            "trace_path": str(tmp_path / "missing_trace.jsonl"),
+            "log_path": str(raw_log),
+            "bundle_path": "/tmp/bundle.json",
+        }
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+
+        result = app_mod.cb_developer_trace(state=None)
+
+        assert "train-models" in result
+        assert "missing_trace" not in result
+
+    def test_cb_developer_trace_falls_back_to_cache_trace_when_no_active_run(self, tmp_path, monkeypatch):
+        """cb_developer_trace must use state.cache_trace_path when no active run."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        cache_trace = tmp_path / "trace_events_cached.jsonl"
+        cache_trace.write_text(
+            "\n".join(
+                [
+                    json.dumps({"run_id": "20260416_120000", "stage": "full", "event_type": "run_start"}),
+                    json.dumps(
+                        {
+                            "run_id": "20260416_120000",
+                            "stage": "full",
+                            "event_type": "node_complete",
+                            "node": "evaluate-models",
+                            "status": "warn",
+                            "state_keys_written": ["evaluation_results"],
+                        }
+                    ),
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        raw_log = tmp_path / "stage_full_cached.log"
+        raw_log.write_text(
+            "12:00:00 INFO    bt5151_credit_risk.graph  >>> train-models\n",
             encoding="utf-8",
         )
 
         state = _mock_state()
-        state.cache_log_path = str(cache_log)
+        state.cache_trace_path = str(cache_trace)
+        state.cache_log_path = str(raw_log)
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: None)
+
+        result = app_mod.cb_developer_trace(state=state)
+
+        assert "evaluate-models" in result
+        assert "train-models" not in result
+
+    def test_cb_developer_trace_falls_back_to_raw_log_when_no_trace_artifact(self, tmp_path, monkeypatch):
+        """cb_developer_trace must use raw stage logs only as the final fallback."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        state = _mock_state()
+        state.cache_trace_path = None
+        state.cache_log_path = None
+        raw_log = tmp_path / "stage.log"
+        raw_log.write_text(
+            "12:00:00 INFO    bt5151_credit_risk.graph  >>> evaluate-models\n",
+            encoding="utf-8",
+        )
+        state.cache_log_path = str(raw_log)
 
         monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: None)
 
@@ -311,7 +515,7 @@ class TestDeveloperTrace:
         assert "evaluate-models" in result
 
     def test_cb_developer_trace_friendly_message_when_log_missing(self, monkeypatch):
-        """cb_developer_trace must not crash when log file is missing."""
+        """cb_developer_trace must not crash when no trace artifact exists."""
         import importlib
 
         import app as app_mod
@@ -319,6 +523,7 @@ class TestDeveloperTrace:
         importlib.reload(app_mod)
 
         state = _mock_state()
+        state.cache_trace_path = None
         state.cache_log_path = "/nonexistent/path/stage.log"
 
         monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: None)
@@ -332,6 +537,226 @@ class TestDeveloperTrace:
         assert any(kw in text for kw in ("not found", "unavailable", "no log", "missing", "⚠")), (
             f"Expected friendly not-found message, got: {result!r}"
         )
+
+    def test_cb_developer_trace_reuses_cached_parse_when_file_unchanged(self, tmp_path, monkeypatch):
+        """Repeated polls on an unchanged artifact should reuse the cached markdown."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        trace_path = tmp_path / "trace_events_20260416_120000.jsonl"
+        trace_path.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "train-models",
+                    "status": "pass",
+                    "state_keys_written": ["trained_models"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260416_120000",
+            "status": "running",
+            "pid": os.getpid(),
+            "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
+            "trace_path": str(trace_path),
+        }
+
+        call_count = {"parse": 0}
+
+        def fake_parse(path):
+            call_count["parse"] += 1
+            return {
+                "run_summary": {
+                    "log_path": str(path),
+                    "artifact_type": "structured_trace",
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "total_events": 1,
+                },
+                "cards": [
+                    {
+                        "node_name": "train-models",
+                        "status": "pass",
+                        "summary_lines": ["cached trace"],
+                        "warning_lines": [],
+                        "raw_lines": [],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+        monkeypatch.setattr("bt5151_credit_risk.ui_trace.parse_trace_artifact", fake_parse)
+
+        first = app_mod.cb_developer_trace(state=None)
+        second = app_mod.cb_developer_trace(state=None)
+
+        assert call_count["parse"] == 1
+        assert first == second
+
+    def test_cb_developer_trace_reparses_when_trace_grows(self, tmp_path, monkeypatch):
+        """Appending to the trace artifact should invalidate the cached markdown."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        trace_path = tmp_path / "trace_events_20260416_120000.jsonl"
+        trace_path.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "train-models",
+                    "status": "pass",
+                    "state_keys_written": ["trained_models"],
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260416_120000",
+            "status": "running",
+            "pid": os.getpid(),
+            "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
+            "trace_path": str(trace_path),
+        }
+
+        call_count = {"parse": 0}
+
+        def fake_parse(path):
+            call_count["parse"] += 1
+            return {
+                "run_summary": {
+                    "log_path": str(path),
+                    "artifact_type": "structured_trace",
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "total_events": call_count["parse"],
+                },
+                "cards": [
+                    {
+                        "node_name": "train-models",
+                        "status": "pass",
+                        "summary_lines": [f"parse #{call_count['parse']}"],
+                        "warning_lines": [],
+                        "raw_lines": [],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+        monkeypatch.setattr("bt5151_credit_risk.ui_trace.parse_trace_artifact", fake_parse)
+
+        first = app_mod.cb_developer_trace(state=None)
+        trace_path.write_text(
+            trace_path.read_text(encoding="utf-8")
+            + json.dumps(
+                {
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "event_type": "cache_saved",
+                    "status": "pass",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        second = app_mod.cb_developer_trace(state=None)
+
+        assert call_count["parse"] == 2
+        assert first != second
+
+    def test_cb_developer_trace_reparses_when_trace_path_changes(self, tmp_path, monkeypatch):
+        """Switching trace artifact paths should bypass the memoized markdown."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        trace_path_1 = tmp_path / "trace_events_1.jsonl"
+        trace_path_1.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_120000",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "train-models",
+                    "status": "pass",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        trace_path_2 = tmp_path / "trace_events_2.jsonl"
+        trace_path_2.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_120001",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "evaluate-models",
+                    "status": "warn",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260416_120000",
+            "status": "running",
+            "pid": os.getpid(),
+            "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
+            "trace_path": str(trace_path_1),
+        }
+
+        call_count = {"parse": 0}
+
+        def fake_parse(path):
+            call_count["parse"] += 1
+            return {
+                "run_summary": {
+                    "log_path": str(path),
+                    "artifact_type": "structured_trace",
+                    "run_id": "20260416_120000" if path == trace_path_1 else "20260416_120001",
+                    "stage": "full",
+                    "total_events": 1,
+                },
+                "cards": [
+                    {
+                        "node_name": "train-models" if path == trace_path_1 else "evaluate-models",
+                        "status": "pass" if path == trace_path_1 else "warn",
+                        "summary_lines": ["cached trace"],
+                        "warning_lines": [],
+                        "raw_lines": [],
+                    }
+                ],
+            }
+
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+        monkeypatch.setattr("bt5151_credit_risk.ui_trace.parse_trace_artifact", fake_parse)
+
+        first = app_mod.cb_developer_trace(state=None)
+        active["trace_path"] = str(trace_path_2)
+        second = app_mod.cb_developer_trace(state=None)
+
+        assert call_count["parse"] == 2
+        assert "train-models" in first
+        assert "evaluate-models" in second
 
 
 # ---------------------------------------------------------------------------

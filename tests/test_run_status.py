@@ -28,6 +28,7 @@ def test_active_run_round_trip(tmp_path):
         row_index=42,
         log_path="/tmp/stage_full_20260416_120000.log",
         bundle_path="/tmp/analysis_bundle_20260416_120000.json",
+        trace_path="/tmp/trace_events_20260416_120000.jsonl",
     )
     status = read_active_run()
     assert status["status"] == "running"
@@ -35,6 +36,7 @@ def test_active_run_round_trip(tmp_path):
     assert status["row_index"] == 42
     assert "pid" in status
     assert "pid_start_time" in status
+    assert status["trace_path"] == "/tmp/trace_events_20260416_120000.jsonl"
 
     mark_run_completed("20260416_120000")
     status = read_active_run()
@@ -55,6 +57,7 @@ def test_mark_run_failed(tmp_path):
         row_index=5,
         log_path="/tmp/stage.log",
         bundle_path="/tmp/bundle.json",
+        trace_path="/tmp/trace_events.jsonl",
     )
     mark_run_failed("20260416_130000", error="OutOfMemory")
     status = read_active_run()
@@ -85,6 +88,7 @@ def test_stale_pid_rewritten_to_failed(tmp_path, monkeypatch):
         "pid_start_time": 0.0,  # wrong start time → treated as stale
         "log_path": "/tmp/stage.log",
         "bundle_path": "/tmp/bundle.json",
+        "trace_path": "/tmp/trace_events.jsonl",
         "started_at": "2026-04-16T14:00:00Z",
         "completed_at": None,
         "error": None,
@@ -94,6 +98,58 @@ def test_stale_pid_rewritten_to_failed(tmp_path, monkeypatch):
     status = read_active_run()
     assert status["status"] == "failed"
     assert "process died" in status["error"]
+
+
+def test_write_active_run_persists_trace_path(tmp_path):
+    from bt5151_credit_risk.run_status import read_active_run, write_active_run
+
+    write_active_run(
+        run_id="20260416_150000",
+        stage="full",
+        row_index=9,
+        log_path="/tmp/stage.log",
+        bundle_path="/tmp/bundle.json",
+        trace_path="/tmp/trace_events_20260416_150000.jsonl",
+    )
+
+    status = read_active_run()
+    assert status["trace_path"] == "/tmp/trace_events_20260416_150000.jsonl"
+
+
+def test_mark_run_completed_and_failed_noop_on_run_id_mismatch(tmp_path):
+    import bt5151_credit_risk.run_status as rs_mod
+    import psutil
+
+    pid = os.getpid()
+
+    rs_mod.ACTIVE_RUN_FILE.write_text(
+        json.dumps(
+            {
+                "run_id": "20260416_160000",
+                "stage": "full",
+                "row_index": 1,
+                "status": "running",
+                "pid": pid,
+                "pid_start_time": psutil.Process(pid).create_time(),
+                "log_path": "/tmp/stage.log",
+                "bundle_path": "/tmp/bundle.json",
+                "trace_path": "/tmp/trace.jsonl",
+                "started_at": "2026-04-16T16:00:00Z",
+                "completed_at": None,
+                "error": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rs_mod.mark_run_completed("20260416_160001")
+    rs_mod.mark_run_failed("20260416_160001", error="should not apply")
+
+    status = rs_mod.read_active_run()
+    assert status["run_id"] == "20260416_160000"
+    assert status["status"] == "running"
+    assert status["completed_at"] is None
+    assert status["error"] is None
 
 
 def test_is_process_alive_current_process():

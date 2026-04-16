@@ -71,11 +71,31 @@ def reason_model_selection(
     if fe_hypothesis:
         payload["fe_hypothesis"] = fe_hypothesis
 
+    metric_best = choose_best_model(evaluation_results)
+
     try:
-        result = call_json_response(system_prompt, payload, caller="reason-model-selection")
-        if "model_name" in result and result["model_name"] in evaluation_results:
-            return result
-        logger.warning("    LLM model selection returned invalid model_name, falling back to metric-based")
+        result = call_json_response(system_prompt, payload, caller="reason-model-selection") or {}
+        advisory_model_name = result.get("model_name")
+        if advisory_model_name and advisory_model_name != metric_best["model_name"]:
+            logger.warning(
+                "    LLM model selection suggested %s, but metric-best %s remains authoritative",
+                advisory_model_name,
+                metric_best["model_name"],
+            )
+
+        advisory = dict(metric_best)
+        llm_justification = (result.get("justification") or "").strip()
+        if llm_justification:
+            advisory["justification"] = (
+                f"{metric_best['justification']} LLM rationale: {llm_justification}"
+            )
+        else:
+            advisory["justification"] = metric_best["justification"]
+        if advisory_model_name:
+            advisory["llm_model_name"] = advisory_model_name
+        if "hypothesis_validation" in result:
+            advisory["hypothesis_validation"] = result.get("hypothesis_validation")
+        return advisory
     except Exception as exc:
         logger.warning("    LLM model selection failed (%s), falling back to metric-based", exc)
 

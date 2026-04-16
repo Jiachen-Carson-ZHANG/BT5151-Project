@@ -222,3 +222,20 @@ For columns `["ID", "Age", "Smoker", "Diagnosis"]` where ID and Diagnosis are dr
   )
   ```
 - **Domain-aware imputation fallbacks.** When a numeric column can be mechanically derived from another (e.g. a monthly figure from an annual one), use the derivation as a secondary fill BEFORE falling back to the global median. The spec may declare this as `fallback_formula`; if so, evaluate it after the referenced column is itself cleaned. Canonical example: when `Monthly_Inhand_Salary` (15% missing) has a `fallback_formula` of `Annual_Income / 12`, apply it after Annual_Income is converted and imputed: `df['Monthly_Inhand_Salary'] = df['Monthly_Inhand_Salary'].fillna(df['Annual_Income'] / 12).fillna(df['Monthly_Inhand_Salary'].median())`. Similarly, `Monthly_Balance = Monthly_Inhand_Salary - Total_EMI_per_month` when both are clean. Never skip a `fallback_formula` — it preserves customer-level signal that global median destroys.
+- **`.median()` / `.mean()` on object-dtype series raises in pandas 3.x.** Some columns look numeric but are stored as object dtype in the CSV because they contain stray non-numeric characters (e.g. `Num_of_Loan` contains values like `"3_"` or `"2-"`, `Monthly_Balance` has mixed types at the chunk boundary). Calling `.median()` on the raw column before `pd.to_numeric` will raise `TypeError: could not convert string to float`. The fix is always the same — convert first, aggregate second:
+  ```python
+  converted = pd.to_numeric(df['col'], errors='coerce')
+  df['col'] = converted.fillna(converted.median())
+  ```
+  This applies to EVERY numeric operation (median, mean, clip, std) — never call the aggregation on `df['col']` before the column has been converted.
+- **Performance budget: the script must complete in under 200 seconds on 100 000 rows.** This is a hard constraint — the subprocess is killed at 300 s. Common causes of timeout:
+  - Row-wise `.apply()` — replace with vectorized pandas operations.
+  - `groupby().apply(lambda ...)` with a Python function — replace with `groupby().transform('median')` or `groupby().transform(lambda s: ...)` staying in pandas.
+  - Calling `groupby().transform` **inside a loop over columns** — collect all columns that share the same grouper and do one grouped transform, not N separate ones.
+  - Regex `.apply(re.sub, ...)` row-wise — use `str.replace(pattern, repl, regex=True)` which is vectorized.
+  If you need a group-level statistic for imputation, the canonical fast pattern is:
+  ```python
+  fill_values = df.groupby(grouper_col)['target_col'].transform('median')
+  df['target_col'] = df['target_col'].fillna(fill_values)
+  ```
+  This runs in O(n) not O(n_groups × n_rows).

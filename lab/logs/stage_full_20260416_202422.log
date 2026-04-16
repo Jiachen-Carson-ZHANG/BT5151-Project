@@ -1,0 +1,6 @@
+20:24:22 INFO    run_stage  Stage: full | Log file: /home/tough/BT5151 GroupProject/lab/logs/stage_full_20260416_202422.log
+20:24:22 INFO    run_stage  --save-cache enabled: pipeline state will be serialized after run
+20:24:22 INFO    bt5151_credit_risk.run_status  active_run written: run_id=20260416_202422 stage=full
+20:24:29 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=547) ===
+20:24:29 INFO    bt5151_credit_risk.graph  >>> dataset-policy-spec: loading /home/tough/BT5151 GroupProject/train.csv
+20:24:31 INFO    bt5151_credit_risk.graph      loaded 100000 rows x 28 columns

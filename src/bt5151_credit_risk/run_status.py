@@ -40,6 +40,7 @@ def write_active_run(
     row_index: int,
     log_path: str,
     bundle_path: str,
+    trace_path: str,
 ) -> None:
     """Write a running-status record to ACTIVE_RUN_FILE.
 
@@ -59,6 +60,7 @@ def write_active_run(
         "pid_start_time": pid_start_time,
         "log_path": log_path,
         "bundle_path": bundle_path,
+        "trace_path": trace_path,
         "started_at": datetime.now(timezone.utc).isoformat(),
         "completed_at": None,
         "error": None,
@@ -73,6 +75,13 @@ def mark_run_completed(run_id: str) -> None:
     if record is None:
         logger.warning("mark_run_completed called but no active_run.json found")
         return
+    if record.get("run_id") != run_id:
+        logger.warning(
+            "mark_run_completed called for run_id=%s but active_run.json belongs to %s; no-op",
+            run_id,
+            record.get("run_id"),
+        )
+        return
     record["status"] = "completed"
     record["completed_at"] = datetime.now(timezone.utc).isoformat()
     ACTIVE_RUN_FILE.write_text(json.dumps(record, indent=2), encoding="utf-8")
@@ -84,6 +93,13 @@ def mark_run_failed(run_id: str, error: str) -> None:
     record = _load_raw()
     if record is None:
         logger.warning("mark_run_failed called but no active_run.json found")
+        return
+    if record.get("run_id") != run_id:
+        logger.warning(
+            "mark_run_failed called for run_id=%s but active_run.json belongs to %s; no-op",
+            run_id,
+            record.get("run_id"),
+        )
         return
     record["status"] = "failed"
     record["error"] = error

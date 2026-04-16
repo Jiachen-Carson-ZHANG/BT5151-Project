@@ -21,7 +21,7 @@ These are enforced by static analysis — repaired code that violates them will 
 Think through these steps before writing the repair:
 
 1. **Identify the root cause.** Read the error feedback carefully. Common failure modes:
-   - `KeyError` — column name mismatch between what the code expects and what exists
+   - `KeyError` — column name mismatch between what the code expects and what exists. **Most common cause**: a ratio or interaction was written against a column that preprocessing dropped (e.g., `Monthly_Inhand_Salary` dropped as high-correlation, then `EMI_to_Salary_Ratio` tries to use it as denominator). Fix: guard every interaction with `if 'col' in train_df.columns` or remove the interaction if the parent is gone.
    - NaN introduction — a transform produced NaN (e.g., log of negative, division by zero)
    - Row count change — code accidentally filtered rows instead of just transforming columns
    - Column misalignment — train and test have different columns after transforms
@@ -71,6 +71,7 @@ The `hypothesis` field is **required**. Preserve the hypothesis from the origina
 - **Epsilon denominators are usually a bug, not a fix.** If a ratio is producing extreme spikes, replace `/(denominator + 1e-6)` with zero-aware branching and then clean up any resulting NaN using train-only statistics.
 - **Dual-view outputs must stay internally aligned.** If the code writes `linear_view` and `tree_view`, each view must have matching train/test columns within that view, and `view_metadata.json` must reference the correct artifact names.
 - **Deferred columns must be fully encoded in EVERY view, with the encoding tailored to that view's model family.** A deferred column (string dtype coming out of preprocessing) is not done after encoding it in one view — if the validation error says it is still a string in `tree_view` but numeric in `linear_view` (or vice versa), the encoding block was only written for one view. Fix both. The encoding strategy should be appropriate to the view: one-hot or standardized for `linear_view` (linear models need explicit dummy variables and scaled inputs); frequency or ordinal for `tree_view` (tree models can exploit compact numeric representations without needing explicit dummies). Never apply the same encoding blindly to both views — that defeats the purpose of the dual-view architecture.
+- **`feature_lineage.json` must still be written.** Every run produces a lineage manifest that the validator replays against the data. If the validation report flagged `lineage_replay_matches`, `ratios_use_raw_parents`, or `lineage_coverage_complete`, your repair must fix both the code AND the lineage entries so they agree. Ratio/product/sum/difference/interaction features must have `input_stage: pre_fe_raw_numeric` — compute them from the raw train/test frames passed to your function, not from log-transformed versions. Top-5 MI raw features can only appear in `dropped_features` with `drop_reason ∈ {leakage, deterministic_duplicate}`.
 
 ## Notes
 

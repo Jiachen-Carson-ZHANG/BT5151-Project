@@ -15,6 +15,7 @@ Keys preserved:
   - training_diagnostics, evaluation_results
   - analysis_bundle, analysis_bundle_summary
   - eda_hypotheses, feature_engineering_hypothesis
+  - cache_log_path, cache_bundle_path, cache_trace_path, cache_saved_at
 """
 
 import logging
@@ -72,6 +73,7 @@ CACHE_KEYS = [
     "run_id",
     "cache_log_path",
     "cache_bundle_path",
+    "cache_trace_path",
     "cache_saved_at",
 ]
 
@@ -82,7 +84,7 @@ def save_cache(result: dict, metadata: dict | None = None, compress: int = 3) ->
     Args:
         result: Dict returned by compiled.invoke() or accumulated from stream.
         metadata: Optional provenance metadata (cache_log_path, cache_bundle_path,
-            cache_saved_at) to merge into the stored payload.
+            cache_trace_path, cache_saved_at) to merge into the stored payload.
         compress: joblib compress level (0-9); 3 is a good speed/size balance.
 
     Returns:

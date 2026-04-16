@@ -1,0 +1,14 @@
+{
+  "run_id": "20260416_202422",
+  "stage": "full",
+  "row_index": 547,
+  "status": "failed",
+  "pid": 561577,
+  "pid_start_time": 1776342260.17,
+  "log_path": "/home/tough/BT5151 GroupProject/lab/logs/stage_full_20260416_202422.log",
+  "bundle_path": "/home/tough/BT5151 GroupProject/lab/logs/analysis_bundle_20260416_202422.json",
+  "trace_path": "/home/tough/BT5151 GroupProject/lab/logs/trace_events_20260416_202422.jsonl",
+  "started_at": "2026-04-16T12:24:22.928542+00:00",
+  "completed_at": "2026-04-16T12:24:35.397053+00:00",
+  "error": "Stopped by user via UI"
+}

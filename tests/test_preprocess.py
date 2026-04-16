@@ -10,6 +10,7 @@ from bt5151_credit_risk.preprocess import generate_preprocessing_code
 from bt5151_credit_risk.preprocess import inspect_preprocessing_code
 from bt5151_credit_risk.preprocess import repair_preprocessing_code
 from bt5151_credit_risk.preprocess import validate_preprocessing_output
+from bt5151_credit_risk.preprocess import validate_semantic_invariants
 from bt5151_credit_risk.preprocess import validate_semantic_roles
 
 
@@ -598,7 +599,7 @@ def test_execute_generated_preprocessing_creates_workspace_and_artifacts(sample_
 
     execution_log = result["execution_log"]
     assert execution_log["returncode"] == 0
-    assert execution_log["timeout_seconds"] == 180
+    assert execution_log["timeout_seconds"] == 300
     assert "stdout" in execution_log
     assert "stderr" in execution_log
 
@@ -915,3 +916,120 @@ def test_validate_semantic_roles_rejects_non_deferred_string_column():
     assert any(v["violation"] == "unordered_categorical_not_encoded" for v in occ_violations), (
         f"Expected 'unordered_categorical_not_encoded' violation, got: {occ_violations}"
     )
+
+
+def test_numeric_role_rejects_object_dtype():
+    """Phase 1.1: numeric_count / numeric_continuous with object dtype must emit
+    not_numeric_dtype — the old one-sided `if numeric and ...` guard let this slip."""
+    frame = pd.DataFrame({"Age": ["25", "bad", "40", None]})
+    spec = {
+        "transforms": {
+            "Age": {"semantic_role": "numeric_count", "action": "keep"},
+        }
+    }
+    violations = validate_semantic_roles(frame, spec)
+    assert any(
+        v["violation"] == "not_numeric_dtype" and v["column"] == "Age"
+        for v in violations
+    )
+
+
+def test_numeric_continuous_object_dtype_rejected():
+    """Same gate applies to numeric_continuous."""
+    frame = pd.DataFrame({"Income": ["1000", "2000", "bad"]})
+    spec = {
+        "transforms": {
+            "Income": {"semantic_role": "numeric_continuous", "action": "keep"},
+        }
+    }
+    violations = validate_semantic_roles(frame, spec)
+    assert any(
+        v["violation"] == "not_numeric_dtype" and v["column"] == "Income"
+        for v in violations
+    )
+
+
+def test_invariant_age_out_of_range():
+    """Phase 1.2: Age outside [18, 100] triggers age_out_of_range."""
+    frame = pd.DataFrame({"Age": [25, 30, -5, 200, 45]})
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert any(v["violation"] == "age_out_of_range" for v in violations)
+
+
+def test_invariant_age_low_cardinality_single_value():
+    """Phase 1.2: Age collapsed to a single value on a production-sized frame
+    triggers age_low_cardinality (threshold is frame_len >= 100)."""
+    frame = pd.DataFrame({"Age": [33] * 150})
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert any(v["violation"] == "age_low_cardinality" for v in violations)
+
+
+def test_invariant_age_low_cardinality_skipped_on_small_frame():
+    """Phase 1.2: cardinality check must not fire on toy/test frames where
+    nunique is bounded by row count."""
+    frame = pd.DataFrame({"Age": list(range(25, 31))})
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert not any(v["violation"] == "age_low_cardinality" for v in violations)
+
+
+def test_invariant_credit_history_age_year_only_flagged():
+    """Phase 1.2: if every Credit_History_Age value is a multiple of 12, months
+    were discarded — credit_history_age_year_only must fire."""
+    frame = pd.DataFrame({"Credit_History_Age": [12, 24, 36, 48, 60, 72, 12, 24]})
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert any(v["violation"] == "credit_history_age_year_only" for v in violations)
+
+
+def test_invariant_credit_history_age_low_cardinality_vs_raw():
+    """Phase 1.2: output cardinality much smaller than raw triggers
+    credit_history_age_low_cardinality."""
+    raw = pd.DataFrame({
+        "Credit_History_Age": [f"{y} Years and {m} Months" for y in range(1, 21) for m in range(12)]
+    })
+    out = pd.DataFrame({"Credit_History_Age": [12.0, 24.0, 36.0, 48.0, 60.0] * 48})
+    violations = validate_semantic_invariants(out, raw_frame=raw, column_transform_spec={})
+    assert any(
+        v["violation"] == "credit_history_age_low_cardinality" for v in violations
+    )
+
+
+def test_invariant_missing_sentinel_collision():
+    """Phase 1.2: a row with <col>_missing=1 and <col>_<value>=1 at the same
+    time is a double-encoded missingness bug."""
+    frame = pd.DataFrame({
+        "Type_of_Loan_missing": [1, 0, 0, 1, 0],
+        "Type_of_Loan_Home Loan": [1, 1, 0, 0, 0],
+        "Type_of_Loan_Auto Loan": [0, 0, 1, 0, 1],
+    })
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert any(v["violation"] == "missing_sentinel_collision" for v in violations)
+
+
+def test_invariant_duplicate_missingness_encoding_not_specified():
+    """Phase 1.2: a <col>_Not Specified dummy alongside <col>_missing is forbidden."""
+    frame = pd.DataFrame({
+        "Occupation_missing": [1, 0, 1, 0],
+        "Occupation_Not Specified": [1, 0, 1, 0],
+        "Occupation_Engineer": [0, 1, 0, 1],
+    })
+    violations = validate_semantic_invariants(frame, raw_frame=None, column_transform_spec={})
+    assert any(v["violation"] == "duplicate_missingness_encoding" for v in violations)
+
+
+def test_invariant_passes_on_clean_frame():
+    """Phase 1.2: well-formed frame should emit zero invariant violations."""
+    raw = pd.DataFrame({
+        "Credit_History_Age": [
+            f"{y} Years and {m} Months" for y in range(1, 11) for m in range(0, 6)
+        ]  # 60 unique raw strings
+    })
+    # Output covers months with enough non-year values (>5%) and cardinality
+    # ratio stays >= 0.3 against the raw 60 unique strings.
+    ages = list(range(18, 78))
+    cha = [12 * y + m for y in range(1, 11) for m in range(0, 6)]
+    frame = pd.DataFrame({
+        "Age": ages,
+        "Credit_History_Age": cha,
+    })
+    violations = validate_semantic_invariants(frame, raw_frame=raw, column_transform_spec={})
+    assert violations == [], violations

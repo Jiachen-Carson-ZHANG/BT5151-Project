@@ -65,7 +65,7 @@ These are non-negotiable correctness rules. They protect against bugs, not again
 ### Mandatory
 
 1. **Drop constant features** (nunique ≤ 1 on train). Zero variance = zero signal.
-2. **Drop perfectly correlated pairs** (|r| > 0.95). Keep the one with higher variance.
+2. **Drop perfectly correlated pairs** (|r| > 0.95). When both features have MI scores, **keep the higher-MI feature** — mutual information measures actual class-separating signal, variance does not. When |r| > 0.95, keep the higher-MI feature, not the higher-variance feature. **Absolute protection: NEVER drop a top-5 MI raw feature in favor of a lower-MI proxy**, even if the pair correlates at |r| > 0.95, unless the pair is a deterministic duplicate (identical values on every row) or a leakage feature (derived from the target). Correlation after imputation is an artifact of how missing values were filled — it does not eliminate independent class-separating signal. A correlated pair like Monthly_Inhand_Salary / Annual_Income should both be kept if either ranks in the top-5 MI. The correlation drop only applies to features where **both** features have MI rank > 5.
 3. **Replace inf values after ALL transforms.** Log, ratio, and division can produce inf. This cleanup is mandatory — the pipeline rejects data with inf:
    ```python
    for col in train_df.select_dtypes(include='number').columns:
@@ -83,8 +83,8 @@ These are non-negotiable correctness rules. They protect against bugs, not again
 5. **Division safety must preserve semantic meaning.** Do not hide zero denominators behind `denominator + 1e-6`; that creates artificial million-scale spikes that dominate the model for the wrong reason. Use zero-aware logic instead, such as `np.where(denominator > 0, numerator / denominator, 0.0)` or `np.where(denominator > 0, numerator / denominator, np.nan)` followed by train-median imputation.
 6. **Log-transform only non-negative columns.** `np.log1p` is undefined for negative values. Check `train_df[col].min() >= 0` first.
 7. **Deferred categoricals must be encoded per view, and every emitted view must be fully numeric.** Columns arriving as object-dtype are unordered_categoricals the spec deferred to you. Encode them separately for each view, using train-only statistics, then assert no object-dtype columns remain before writing:
-   - **Very low cardinality (`nunique` on train ≤ 12):** one-hot for both `linear_view` and `tree_view` is acceptable — preserves category identity and the dimensionality cost is tiny.
-   - **Medium cardinality (13–50):** one-hot for `linear_view`; **frequency encoding** for `tree_view` (`train_freq = train[col].map(train[col].value_counts(normalize=True)); test[col] = test[col].map(train_freq_dict).fillna(0.0)`). Frequency encoding is monotone in prevalence, compact, and avoids the fake ordering that raw label encoding injects.
+   - **Very low cardinality (`nunique` on train ≤ 20):** one-hot for both `linear_view` and `tree_view`. Preserves category identity and the dimensionality cost is small. This threshold is intentionally generous — identity-significant columns like occupation type or product category (16–20 distinct values) must NOT be frequency-encoded because two categories with similar prevalence become numerically indistinguishable even if their risk profiles differ completely.
+   - **Medium cardinality (21–50):** one-hot for `linear_view`; **frequency encoding** for `tree_view` (`train_freq = train[col].map(train[col].value_counts(normalize=True)); test[col] = test[col].map(train_freq_dict).fillna(0.0)`). Frequency encoding is monotone in prevalence, compact, and avoids the fake ordering that raw label encoding injects.
    - **High cardinality (> 50):** frequency encoding for both views by default; **target encoding** is acceptable when it clearly helps, but must use out-of-fold means on train (e.g. 5-fold mean computed from held-out folds) and apply the full-train mean to test — never compute target means on rows that will be predicted.
    - **Never use raw label encoding (`factorize` / arbitrary integer codes) as the default for unordered categories.** It injects lexicographic order that trees will split on for the wrong reason. Only acceptable as a last-resort fallback with an explicit justification in the hypothesis field.
    - Before writing each view's CSV, assert both frames are fully numeric, allowing boolean dummy columns but rejecting any remaining string/category/object columns:
@@ -114,20 +114,29 @@ These are non-negotiable correctness rules. They protect against bugs, not again
    ```
    This is separate from the global inf/NaN cleanup at the end — engineered ratios are the primary source of tail outliers because division amplifies small-denominator rows. Catching them per-ratio prevents a single broken cell from producing a million-valued feature that trees split on for the wrong reason.
 
+9. **Only build interactions from columns that exist in the input.** The preprocessing stage may drop or skip columns (e.g. high-correlation drops, policy exclusions). Before writing any ratio or product, verify the parent columns are present in `train_df`:
+   ```python
+   AVAILABLE = set(train_df.columns)
+   if 'Total_EMI_per_month' in AVAILABLE and 'Monthly_Inhand_Salary' in AVAILABLE:
+       train_df['EMI_to_Salary_Ratio'] = ...
+   ```
+   Never write `train_df['col_a'] / train_df['col_b']` if either column might have been dropped by preprocessing. A `KeyError` on a dropped column is the most common FE failure mode — guard every interaction with an existence check. If a canonical ratio cannot be built because a parent is missing, log the skip in the report's `rationale` field and move on.
+
 ## Required code order
 
 Write the code in this order so semantic features stay meaningful:
 
-1. Drop constant or redundant features.
-2. Snapshot or reference the raw parent columns you need for interactions.
-3. Build interaction features from raw values first (numeric-only parents).
-4. Build model-family-specific views if needed (`linear_view`, `tree_view`) from the engineered base table.
-5. Apply log or other monotonic transforms to standalone parent numeric columns.
-6. **Encode any deferred (object-dtype) categorical columns per view** (one-hot for linear; frequency/target for tree, per the cardinality rules above) using train-only statistics.
-7. Replace inf values and fill NaN at the end.
-8. **Assert every emitted view is fully numeric** before writing CSVs.
+1. **Identify** constant and redundant features to drop — but do NOT drop them yet. Store the names in a list.
+2. **Snapshot raw parent columns** needed for every interaction (`base_train = train_df[parent_cols].copy()`, same for test). This snapshot must happen BEFORE any drops, so that a column tagged for redundancy removal (e.g. `Monthly_Inhand_Salary` if it is correlated with `Annual_Income`) is still available to serve as a ratio denominator. Use `base_train` / `base_test` for all interaction formulas.
+3. **Build interaction features** from the raw snapshot (numeric-only parents). Only build an interaction if both parent columns exist in the snapshot — use guardrail #9.
+4. **Drop** constant and redundant columns from the working frames (now safe since interactions are already built from the snapshot).
+5. Build model-family-specific views if needed (`linear_view`, `tree_view`) from the engineered base table.
+6. Apply log or other monotonic transforms to standalone parent numeric columns.
+7. **Encode any deferred (object-dtype) categorical columns per view** (one-hot for linear; frequency/target for tree, per the cardinality rules above) using train-only statistics.
+8. Replace inf values and fill NaN at the end.
+9. **Assert every emitted view is fully numeric** before writing CSVs.
 
-If an interaction uses columns like `Total_EMI_per_month` and `Monthly_Inhand_Salary`, the interaction must be created from the raw columns before either parent is log-transformed. Never create `log(1+x)/y`, `log(1+x)*y`, or similar semantically broken hybrids unless the transform itself is the explicit feature being studied.
+If an interaction uses columns like `Total_EMI_per_month` and `Monthly_Inhand_Salary`, the interaction must be created from the raw snapshot before either parent is log-transformed or dropped. Never create `log(1+x)/y`, `log(1+x)*y`, or similar semantically broken hybrids unless the transform itself is the explicit feature being studied.
 
 ### Recommended (apply based on reasoning)
 
@@ -193,6 +202,49 @@ If you truly believe one shared representation is best for all models, you may f
 - `engineered_train.csv`
 - `engineered_test.csv`
 - `feature_engineering_report.json`
+
+### Lineage manifest (mandatory)
+
+Every run must also write `feature_lineage.json` to the workspace describing **how each engineered column was produced from pre-FE inputs**. This is not a log — it is the contract the validator replays against the actual data. A derived ratio whose code says `log(EMI) / log(Salary)` but whose lineage claims `ratio` with `input_stage: pre_fe_raw_numeric` will fail the replay check.
+
+Schema:
+
+```json
+{
+  "derived_features": [
+    {
+      "feature": "EMI_to_Salary_Ratio",
+      "operation": "ratio",
+      "inputs": ["Total_EMI_per_month", "Monthly_Inhand_Salary"],
+      "input_stage": "pre_fe_raw_numeric",
+      "fill_strategy": "zero_aware_branching",
+      "clip_strategy": "p99_upper"
+    },
+    {
+      "feature": "Annual_Income_log1p",
+      "operation": "log1p",
+      "inputs": ["Annual_Income"],
+      "input_stage": "pre_fe_raw_numeric"
+    }
+  ],
+  "dropped_features": [
+    {"feature": "Payment_of_Min_Amount_No", "drop_reason": "deterministic_duplicate", "correlated_with": "Payment_of_Min_Amount_Yes"}
+  ],
+  "passthrough_features": ["Credit_Mix", "Outstanding_Debt"]
+}
+```
+
+Allowed enumerations (the validator rejects anything else):
+- `operation`: `ratio`, `product`, `sum`, `difference`, `log1p`, `bin`, `interaction`, `passthrough`, `one_hot`, `frequency_encode`
+- `input_stage`: `pre_fe_raw_numeric` (the raw train/test frames handed to your FE function), `pre_fe_encoded` (preprocessing output column), `fe_derived` (built from another derived feature in this run)
+- `drop_reason`: `leakage`, `deterministic_duplicate`, `constant`, `correlation_with_higher_mi_feature`
+
+Hard rules the validator enforces:
+
+1. **Ratios, products, sums, differences, and interactions must use `input_stage: pre_fe_raw_numeric`.** No ratio can be built from a log-transformed column. Compute ratios first, log second.
+2. Every output column must appear in `derived_features`, `passthrough_features`, or as an expansion of a `one_hot` entry (columns named `<feature>_<value>`).
+3. The validator samples 20 rows and recomputes each `ratio`, `product`, `sum`, `difference`, or `log1p` feature from the named raw parents. Lineage that disagrees with the actual output fails the run.
+4. Top-5 MI features can only appear in `dropped_features` with `drop_reason ∈ {leakage, deterministic_duplicate}`. Any other reason fails validation.
 
 ## Allowed imports
 

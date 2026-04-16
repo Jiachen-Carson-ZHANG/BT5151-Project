@@ -21,6 +21,7 @@ def _build_fe_artifact_paths(workspace_path: Path) -> dict[str, str]:
         "engineered_test_tree.csv",
         "feature_engineering_report.json",
         "view_metadata.json",
+        "feature_lineage.json",
     ]
     return {name: str(workspace_path / name) for name in artifact_names}
 
@@ -241,13 +242,271 @@ def execute_feature_engineering(
     }
 
 
+# Allowed enumerations for lineage manifest — rejected if anything else appears.
+_LINEAGE_ALLOWED_OPERATIONS = {
+    "ratio", "product", "sum", "difference", "log1p", "bin", "interaction",
+    "passthrough", "one_hot", "frequency_encode",
+}
+_LINEAGE_ALLOWED_INPUT_STAGES = {"pre_fe_raw_numeric", "pre_fe_encoded", "fe_derived"}
+_LINEAGE_ALLOWED_DROP_REASONS = {
+    "leakage", "deterministic_duplicate", "constant", "correlation_with_higher_mi_feature",
+}
+# Operations where `input_stage` must be pre-FE raw numeric (no log-transformed parents).
+_LINEAGE_RAW_PARENT_OPS = {"ratio", "product", "sum", "difference", "interaction"}
+# Operations the replay check actually recomputes row-by-row.
+_LINEAGE_REPLAY_OPS = {"ratio", "product", "sum", "difference", "log1p"}
+
+
+def _apply_lineage_operation(operation: str, input_values: list[float]) -> float | None:
+    """Recompute a derived feature value from its raw inputs. Returns None if
+    the operation is not deterministically replayable (e.g. bin, interaction
+    without a declared operator)."""
+    if operation == "ratio":
+        if len(input_values) != 2:
+            return None
+        a, b = input_values
+        if b == 0 or pd.isna(b):
+            return None  # fill_strategy makes replay ambiguous
+        return a / b
+    if operation == "product":
+        out = 1.0
+        for v in input_values:
+            out *= v
+        return out
+    if operation == "sum":
+        return float(sum(input_values))
+    if operation == "difference":
+        if len(input_values) != 2:
+            return None
+        return input_values[0] - input_values[1]
+    if operation == "log1p":
+        if len(input_values) != 1:
+            return None
+        v = input_values[0]
+        if v < 0 or pd.isna(v):
+            return None
+        return float(np.log1p(v))
+    return None
+
+
+def validate_feature_lineage(
+    lineage: dict,
+    train_frame_pre_fe: pd.DataFrame | None,
+    engineered_train: pd.DataFrame,
+    top_mi_features: list[str] | None,
+) -> list[dict]:
+    """Replay the declared lineage against the actual engineered train frame.
+
+    Returns a list of violation dicts. Empty means lineage is consistent.
+    """
+    violations: list[dict] = []
+
+    def record(rule: str, message: str, **extra) -> None:
+        violations.append({"rule": rule, "message": message, **extra})
+
+    if not isinstance(lineage, dict):
+        record("lineage_artifact_present", "feature_lineage.json is not a valid JSON object.")
+        return violations
+
+    derived = lineage.get("derived_features") or []
+    dropped = lineage.get("dropped_features") or []
+    passthrough = set(lineage.get("passthrough_features") or [])
+
+    if not isinstance(derived, list):
+        record("lineage_schema", "`derived_features` must be a list.")
+        return violations
+
+    # --- Enum validation ---
+    derived_names: set[str] = set()
+    one_hot_parents: set[str] = set()
+    for i, entry in enumerate(derived):
+        if not isinstance(entry, dict):
+            record("lineage_schema", f"derived_features[{i}] is not an object.")
+            continue
+        feature = entry.get("feature")
+        op = entry.get("operation")
+        input_stage = entry.get("input_stage")
+        inputs = entry.get("inputs")
+        if not feature or not isinstance(feature, str):
+            record("lineage_schema", f"derived_features[{i}] missing `feature`.")
+            continue
+        if op not in _LINEAGE_ALLOWED_OPERATIONS:
+            record(
+                "lineage_operation_enum",
+                f"derived_features[{feature!r}] has invalid operation {op!r}. "
+                f"Allowed: {sorted(_LINEAGE_ALLOWED_OPERATIONS)}.",
+                feature=feature,
+            )
+            continue
+        if input_stage not in _LINEAGE_ALLOWED_INPUT_STAGES:
+            record(
+                "lineage_input_stage_enum",
+                f"derived_features[{feature!r}] has invalid input_stage {input_stage!r}. "
+                f"Allowed: {sorted(_LINEAGE_ALLOWED_INPUT_STAGES)}.",
+                feature=feature,
+            )
+            continue
+        if op != "passthrough" and (not isinstance(inputs, list) or not inputs):
+            record(
+                "lineage_inputs_missing",
+                f"derived_features[{feature!r}] (operation={op}) has empty inputs.",
+                feature=feature,
+            )
+            continue
+
+        # Raw-parent rule: ratios/products/sums/differences/interactions must use raw parents.
+        if op in _LINEAGE_RAW_PARENT_OPS and input_stage != "pre_fe_raw_numeric":
+            record(
+                "ratios_use_raw_parents",
+                f"derived_features[{feature!r}] (operation={op}) has "
+                f"input_stage={input_stage!r}. Rule: ratios/products/sums/differences/"
+                f"interactions must be built from pre_fe_raw_numeric inputs — no log-transformed "
+                f"or otherwise pre-transformed parents allowed.",
+                feature=feature,
+            )
+
+        derived_names.add(feature)
+        if op == "one_hot":
+            one_hot_parents.add(feature)
+
+    # --- Dropped features enum + top-MI drop rule ---
+    for i, entry in enumerate(dropped):
+        if not isinstance(entry, dict):
+            record("lineage_schema", f"dropped_features[{i}] is not an object.")
+            continue
+        feature = entry.get("feature")
+        reason = entry.get("drop_reason")
+        if reason not in _LINEAGE_ALLOWED_DROP_REASONS:
+            record(
+                "lineage_drop_reason_enum",
+                f"dropped_features[{feature!r}] has invalid drop_reason {reason!r}. "
+                f"Allowed: {sorted(_LINEAGE_ALLOWED_DROP_REASONS)}.",
+                feature=feature,
+            )
+            continue
+        if top_mi_features and feature in set(top_mi_features):
+            if reason not in {"leakage", "deterministic_duplicate"}:
+                record(
+                    "top_mi_drop_requires_justification",
+                    f"Top-MI feature {feature!r} was dropped with reason {reason!r}. "
+                    f"Rule: top-5 MI raw features can only be dropped by leakage or "
+                    f"deterministic_duplicate — correlation heuristic is not sufficient. "
+                    f"Restore the feature or escalate the drop_reason.",
+                    feature=feature,
+                )
+
+    # --- Coverage: every engineered column must be accounted for ---
+    output_cols = set(engineered_train.columns)
+    unaccounted = []
+    for col in output_cols:
+        if col in derived_names or col in passthrough:
+            continue
+        # Accept one-hot expansions: `<parent>_<value>` where parent has operation=one_hot
+        # OR parent is a passthrough categorical in the input frame.
+        parent_match = False
+        for parent in one_hot_parents | passthrough:
+            if col.startswith(f"{parent}_"):
+                parent_match = True
+                break
+        if parent_match:
+            continue
+        unaccounted.append(col)
+
+    if unaccounted:
+        # Cap the list in the error message.
+        sample = unaccounted[:15]
+        record(
+            "lineage_coverage_complete",
+            f"{len(unaccounted)} engineered column(s) have no lineage entry: {sample}. "
+            f"Every output column must appear in `derived_features`, `passthrough_features`, "
+            f"or be an expansion of a `one_hot` parent.",
+            unaccounted_sample=sample,
+            unaccounted_count=len(unaccounted),
+        )
+
+    # --- Replay check: sample 20 rows, recompute arithmetic ops ---
+    if train_frame_pre_fe is not None and len(engineered_train) > 0:
+        n_sample = min(20, len(engineered_train))
+        # Align indices: engineered_train and train_frame_pre_fe must share
+        # positional order (same rows in same order). We read by position.
+        common_len = min(len(train_frame_pre_fe), len(engineered_train))
+        if common_len < n_sample:
+            n_sample = common_len
+        if n_sample > 0:
+            rng = np.random.RandomState(42)
+            sample_idx = rng.choice(common_len, size=n_sample, replace=False)
+            for entry in derived:
+                if not isinstance(entry, dict):
+                    continue
+                feature = entry.get("feature")
+                op = entry.get("operation")
+                inputs = entry.get("inputs")
+                input_stage = entry.get("input_stage")
+                if op not in _LINEAGE_REPLAY_OPS:
+                    continue
+                if input_stage != "pre_fe_raw_numeric":
+                    continue
+                if feature not in output_cols:
+                    continue
+                if not isinstance(inputs, list):
+                    continue
+                # All parents must exist in the pre-FE frame.
+                if any(parent not in train_frame_pre_fe.columns for parent in inputs):
+                    continue
+                mismatches = []
+                for pos in sample_idx:
+                    try:
+                        parent_vals = [
+                            float(train_frame_pre_fe.iloc[int(pos)][p]) for p in inputs
+                        ]
+                    except (TypeError, ValueError):
+                        continue
+                    expected = _apply_lineage_operation(op, parent_vals)
+                    if expected is None:
+                        continue
+                    try:
+                        actual = float(engineered_train.iloc[int(pos)][feature])
+                    except (TypeError, ValueError, KeyError):
+                        continue
+                    if pd.isna(actual):
+                        continue
+                    if abs(expected - actual) > max(1e-4, 1e-4 * abs(expected)):
+                        mismatches.append({
+                            "row_pos": int(pos),
+                            "expected": round(float(expected), 6),
+                            "actual": round(float(actual), 6),
+                            "parents": {p: round(v, 6) for p, v in zip(inputs, parent_vals)},
+                        })
+                if mismatches:
+                    record(
+                        "lineage_replay_matches",
+                        f"Replay of {feature!r} (operation={op}) disagrees with the "
+                        f"declared lineage on {len(mismatches)}/{n_sample} sampled rows. "
+                        f"The code is likely computing something other than what the lineage claims. "
+                        f"Check for log-transformed parents, wrong order of inputs, or different fill strategies.",
+                        feature=feature,
+                        operation=op,
+                        mismatch_sample=mismatches[:3],
+                    )
+
+    return violations
+
+
 # Validate feature engineering output: row counts, NaNs, feature count.
 def validate_feature_engineering_output(
     execution_result: dict,
     original_train_rows: int,
     original_test_rows: int,
     original_feature_count: int,
+    deferred_categoricals: dict | None = None,
+    top_mi_features: list[str] | None = None,
+    train_frame_pre_fe: pd.DataFrame | None = None,
 ) -> dict:
+    """
+    deferred_categoricals: {col_name: nunique} for object-dtype columns in the preprocessed
+    feature frame. Used to detect frequency-encoding of low-cardinality identity columns in
+    tree_view (which collapses category identity and must be rejected).
+    """
     artifacts = execution_result.get("artifacts", {})
     view_metadata = execution_result.get("view_metadata") or _load_view_metadata(artifacts)
     checks: dict[str, bool] = {}
@@ -258,6 +517,31 @@ def validate_feature_engineering_output(
         checks[rule] = passed
         if not passed:
             errors.append({"rule": rule, "message": message})
+
+    def check_top_mi_not_dropped(output_columns: list[str], view_label: str = "") -> None:
+        """Top-5 MI raw features must survive FE — exact name or as a column prefix.
+
+        A top-MI feature is considered present if:
+        - It appears exactly as-is, OR
+        - At least one output column starts with '<feature>_' (e.g. log-transform, bin).
+        This protects against the LLM dropping high-signal raw features in favor of
+        lower-MI proxies when resolving high-correlation pairs (|r| > 0.95).
+        """
+        if not top_mi_features:
+            return
+        out_set = set(output_columns)
+        label = f"[{view_label}] " if view_label else ""
+        for feat in top_mi_features:
+            present = feat in out_set or any(c == feat or c.startswith(f"{feat}_") for c in out_set)
+            add_check(
+                f"top_mi_feature_preserved_{feat.lower().replace(' ', '_')[:40]}",
+                present,
+                f"{label}Top-MI feature '{feat}' is absent from the output. "
+                f"Rule: when |r| > 0.95, keep the higher-MI feature, not the higher-variance "
+                f"feature. Never drop a top-5 MI raw feature in favor of a lower-MI proxy "
+                f"unless it is a deterministic duplicate or leakage feature. "
+                f"Restore '{feat}' or an explicit derived form (e.g. '{feat}_log', '{feat}_bin').",
+            )
 
     report_path = Path(artifacts.get("feature_engineering_report.json", ""))
 
@@ -344,6 +628,35 @@ def validate_feature_engineering_output(
                     list(train_df.columns) == list(test_df.columns),
                     f"{view_name} train and test columns do not match after feature engineering.",
                 )
+
+                # Top-MI protection: top-5 MI raw features must not be silently dropped.
+                check_top_mi_not_dropped(list(train_df.columns), view_label=view_name)
+
+                # Identity-preservation check for tree_view: low-cardinality deferred
+                # categoricals (≤20 unique values) must NOT appear as a single float column
+                # (frequency encoding signature). They must be one-hot expanded into multiple
+                # {col}_{value} columns so tree models can split on category identity.
+                if view_name == "tree_view" and deferred_categoricals:
+                    output_cols = set(train_df.columns)
+                    for col, n_unique in deferred_categoricals.items():
+                        if n_unique > 20:
+                            continue  # higher cardinality — frequency encoding acceptable
+                        if col in output_cols:
+                            # Single column with the original name = frequency/ordinal encoding
+                            add_check(
+                                f"tree_view_identity_{col}",
+                                False,
+                                f"{col} has {n_unique} unique categories (≤20) but appears as a "
+                                f"single numeric column in tree_view — this is frequency encoding "
+                                f"which collapses category identity. Two categories with the same "
+                                f"prevalence become numerically identical even if their risk profiles "
+                                f"differ. One-hot encode it instead (produces {col}_<value> columns). "
+                                f"Fix: replace frequency encoding with pd.get_dummies(train_df['{col}'], "
+                                f"prefix='{col}') for both views.",
+                            )
+                        else:
+                            checks[f"tree_view_identity_{col}"] = True
+
                 views[view_name] = {
                     "train_artifact": train_artifact,
                     "test_artifact": test_artifact,
@@ -426,16 +739,95 @@ def validate_feature_engineering_output(
                 list(train_df.columns) == list(test_df.columns),
                 "Train and test columns do not match after feature engineering.",
             )
+            # Top-MI protection: top-5 MI raw features must not be silently dropped.
+            check_top_mi_not_dropped(list(train_df.columns))
             views["default"] = {
                 "train_artifact": "engineered_train.csv",
                 "test_artifact": "engineered_test.csv",
                 "feature_count": len(train_df.columns),
             }
 
+    # --- Feature lineage validation ---
+    lineage_violations: list[dict] = []
+    lineage_path = Path(artifacts.get("feature_lineage.json", ""))
+    lineage: dict | None = None
+    if lineage_path.is_file():
+        try:
+            lineage = json.loads(lineage_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            lineage_violations.append({
+                "rule": "lineage_artifact_present",
+                "message": f"feature_lineage.json could not be parsed: {exc}",
+            })
+    else:
+        lineage_violations.append({
+            "rule": "lineage_artifact_present",
+            "message": (
+                f"feature_lineage.json not found in workspace. Every FE run must "
+                f"emit a lineage manifest describing how each engineered column "
+                f"was produced from pre-FE inputs. See skills/generate-feature-"
+                f"engineering-code.md for the required schema."
+            ),
+        })
+
+    # Pick the canonical engineered frame for replay (first view, or default)
+    canonical_train: pd.DataFrame | None = None
+    for view_name, view_spec in views.items():
+        train_artifact = view_spec.get("train_artifact")
+        train_path = Path(artifacts.get(train_artifact, ""))
+        if train_path.is_file():
+            try:
+                canonical_train = pd.read_csv(train_path)
+                break
+            except Exception:
+                continue
+
+    if lineage is not None and canonical_train is not None:
+        try:
+            extra = validate_feature_lineage(
+                lineage, train_frame_pre_fe, canonical_train, top_mi_features
+            )
+            lineage_violations.extend(extra)
+        except Exception as exc:  # pragma: no cover — defensive
+            lineage_violations.append({
+                "rule": "lineage_validator_error",
+                "message": f"lineage validator raised {type(exc).__name__}: {exc}",
+            })
+
+    passed = all(checks.values()) and not errors and not lineage_violations
+
+    # --- Persist feature contract report artifact ---
+    # Use the execution workspace if discoverable; otherwise skip silently.
+    workspace_path: Path | None = None
+    for artifact_name in ("engineered_train.csv", "engineered_train_tree.csv",
+                          "engineered_train_linear.csv", "feature_engineering_report.json"):
+        p = Path(artifacts.get(artifact_name, ""))
+        if p.is_file():
+            workspace_path = p.parent
+            break
+    if workspace_path is not None:
+        try:
+            contract_report = {
+                "workspace": str(workspace_path),
+                "passed": passed,
+                "structural_checks": checks,
+                "errors": errors,
+                "lineage_violations": lineage_violations,
+                "view_mode": "dual" if view_metadata else "single",
+                "available_views": list(views.keys()),
+            }
+            (workspace_path / "feature_contract_report.json").write_text(
+                json.dumps(contract_report, indent=2, default=str),
+                encoding="utf-8",
+            )
+        except Exception:  # pragma: no cover
+            pass
+
     return {
-        "passed": all(checks.values()) and not errors,
+        "passed": passed,
         "checks": checks,
         "errors": errors,
+        "lineage_violations": lineage_violations,
         "view_mode": "dual" if view_metadata else "single",
         "available_views": list(views.keys()),
         "views": views,

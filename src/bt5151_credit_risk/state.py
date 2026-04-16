@@ -66,10 +66,12 @@ class CreditRiskState(BaseModel):
     local_xai_cases: list[dict] | None = None
     global_xai_interpretation: dict | None = None
     local_xai_interpretation: dict | None = None
+    shortcut_audit: dict | None = None
     analysis_bundle: dict | None = None
     analysis_bundle_summary: dict | None = None
     cache_log_path: str | None = None
     cache_bundle_path: str | None = None
+    cache_trace_path: str | None = None
     cache_saved_at: str | None = None
     inference_input: dict | None = None
     prediction_output: dict | None = None

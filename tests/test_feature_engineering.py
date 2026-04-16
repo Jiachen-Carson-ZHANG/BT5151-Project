@@ -17,6 +17,16 @@ def test_validate_feature_engineering_output_accepts_dual_view_artifacts(tmp_pat
     (tmp_path / "engineered_train_tree.csv").write_text(train_tree.to_csv(index=False), encoding="utf-8")
     (tmp_path / "engineered_test_tree.csv").write_text(test_tree.to_csv(index=False), encoding="utf-8")
     (tmp_path / "feature_engineering_report.json").write_text(json.dumps({"added": [], "dropped": [], "transformed": []}), encoding="utf-8")
+    (tmp_path / "feature_lineage.json").write_text(
+        json.dumps(
+            {
+                "derived_features": [],
+                "dropped_features": [],
+                "passthrough_features": ["a", "b", "x"],
+            }
+        ),
+        encoding="utf-8",
+    )
     (tmp_path / "view_metadata.json").write_text(
         json.dumps(
             {
@@ -37,6 +47,7 @@ def test_validate_feature_engineering_output_accepts_dual_view_artifacts(tmp_pat
             "engineered_test_tree.csv": str(tmp_path / "engineered_test_tree.csv"),
             "feature_engineering_report.json": str(tmp_path / "feature_engineering_report.json"),
             "view_metadata.json": str(tmp_path / "view_metadata.json"),
+            "feature_lineage.json": str(tmp_path / "feature_lineage.json"),
         }
     }
 
