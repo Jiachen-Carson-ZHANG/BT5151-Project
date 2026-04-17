@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -8,6 +9,7 @@ from bt5151_credit_risk.preprocess import generate_column_transform_spec
 from bt5151_credit_risk.preprocess import generate_dataset_policy_spec
 from bt5151_credit_risk.preprocess import generate_preprocessing_code
 from bt5151_credit_risk.preprocess import inspect_preprocessing_code
+from bt5151_credit_risk.preprocess import normalize_preprocessing_artifacts
 from bt5151_credit_risk.preprocess import repair_preprocessing_code
 from bt5151_credit_risk.preprocess import validate_preprocessing_output
 from bt5151_credit_risk.preprocess import validate_semantic_invariants
@@ -634,6 +636,315 @@ def test_execute_generated_preprocessing_honors_declared_entrypoint(sample_frame
     assert "custom_preprocessing" in result["execution_log"]["stdout"]
     assert Path(result["artifacts"]["cleaned_frame.csv"]).is_file()
     assert Path(result["artifacts"]["preprocessing_report.json"]).is_file()
+
+
+def test_normalize_preprocessing_artifacts_repairs_credit_history_and_multivalue_missingness(tmp_path):
+    raw_frame = pd.DataFrame(
+        {
+            "Customer_ID": ["C1", "C1", "C2", "C2"],
+            "Credit_Score": ["Good", "Good", "Poor", "Poor"],
+            "Age": ["21", "21", "45", "45"],
+            "Credit_History_Age": [
+                "30 Years and 8 Months",
+                "8 Years and 9 Months",
+                "19 Years and 11 Months",
+                "20 Years and 0 Months",
+            ],
+            "Type_of_Loan": [
+                "Not Specified",
+                None,
+                "Home Loan, Personal Loan",
+                "Home Loan",
+            ],
+        }
+    )
+    cleaned_frame = pd.DataFrame(
+        {
+            "Age": [21.0, 21.0, 45.0, 45.0],
+            "Credit_History_Age": [87.0, 87.0, 87.0, 87.0],
+        }
+    )
+    feature_frame = pd.DataFrame(
+        {
+            "Age": [21.0, 21.0, 45.0, 45.0],
+            "Credit_History_Age": [87.0, 87.0, 87.0, 87.0],
+            "Type_of_Loan_missing": [1, 0, 0, 0],
+            "Type_of_Loan_Not Specified": [1, 1, 0, 0],
+            "Type_of_Loan_Home Loan": [0, 1, 1, 1],
+            "Type_of_Loan_Personal Loan": [0, 0, 1, 0],
+        }
+    )
+
+    raw_frame_path = tmp_path / "raw_frame.csv"
+    cleaned_frame_path = tmp_path / "cleaned_frame.csv"
+    feature_frame_path = tmp_path / "feature_frame.csv"
+    target_path = tmp_path / "target.csv"
+    split_manifest_path = tmp_path / "split_manifest.json"
+    report_path = tmp_path / "preprocessing_report.json"
+    raw_frame.to_csv(raw_frame_path, index=False)
+    cleaned_frame.to_csv(cleaned_frame_path, index=False)
+    feature_frame.to_csv(feature_frame_path, index=False)
+    raw_frame["Credit_Score"].to_frame().to_csv(target_path, index=False)
+    split_manifest_path.write_text(json.dumps({"train_indices": [0, 1], "test_indices": [2, 3]}), encoding="utf-8")
+    report_path.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+
+    execution_result = {
+        "workspace_path": str(tmp_path),
+        "raw_frame_path": str(raw_frame_path),
+        "artifacts": {
+            "cleaned_frame.csv": str(cleaned_frame_path),
+            "feature_frame.csv": str(feature_frame_path),
+            "target.csv": str(target_path),
+            "split_manifest.json": str(split_manifest_path),
+            "preprocessing_report.json": str(report_path),
+        },
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Credit_Score": {"action": "drop", "semantic_role": "target"},
+            "Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+            "Credit_History_Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "cleaning": "extract '(\\d+) Years and (\\d+) Months', compute years*12+months, mark values >1200 as NaN",
+            },
+            "Type_of_Loan": {
+                "action": "keep",
+                "semantic_role": "multi_value_set",
+                "representation_intent": "binary_membership",
+                "cleaning": "create Type_of_Loan_missing when original is NaN or 'Not Specified', then multi_hot",
+            },
+        }
+    }
+
+    report = normalize_preprocessing_artifacts(execution_result, column_transform_spec)
+
+    normalized_feature = pd.read_csv(feature_frame_path)
+    normalized_cleaned = pd.read_csv(cleaned_frame_path)
+
+    assert report["applied"] is True
+    assert "Credit_History_Age" in report["normalized_columns"]
+    assert "Type_of_Loan" in report["normalized_columns"]
+    assert "Type_of_Loan_Not Specified" not in normalized_feature.columns
+    assert normalized_feature["Type_of_Loan_missing"].tolist()[:2] == [1, 1]
+    assert normalized_feature.loc[0, "Type_of_Loan_Home Loan"] == 0
+    assert normalized_feature.loc[1, "Type_of_Loan_Home Loan"] == 0
+    assert normalized_feature["Credit_History_Age"].tolist() == [39.0, 39.0, 239.0, 240.0]
+    assert normalized_cleaned["Credit_History_Age"].tolist() == [39.0, 39.0, 239.0, 240.0]
+
+
+def test_normalize_preprocessing_artifacts_repairs_age_before_credit_history_cap(tmp_path):
+    raw_frame = pd.DataFrame(
+        {
+            "Customer_ID": ["C1", "C1", "C2"],
+            "Credit_Score": ["Good", "Good", "Poor"],
+            "Age": ["23", "-500", "45_"],
+            "Credit_History_Age": [
+                "22 Years and 1 Months",
+                None,
+                "19 Years and 11 Months",
+            ],
+            "Type_of_Loan": ["Auto Loan", "Not Specified", "Home Loan"],
+        }
+    )
+    cleaned_frame = pd.DataFrame(
+        {
+            "Age": [23.0, 118.0, 45.0],
+            "Credit_History_Age": [265.0, 265.0, 239.0],
+        }
+    )
+    feature_frame = cleaned_frame.copy()
+    feature_frame["Type_of_Loan_missing"] = [0, 0, 0]
+    feature_frame["Type_of_Loan_Not Specified"] = [0, 1, 0]
+    feature_frame["Type_of_Loan_Auto Loan"] = [1, 0, 0]
+    feature_frame["Type_of_Loan_Home Loan"] = [0, 0, 1]
+
+    raw_frame_path = tmp_path / "raw_frame.csv"
+    cleaned_frame_path = tmp_path / "cleaned_frame.csv"
+    feature_frame_path = tmp_path / "feature_frame.csv"
+    raw_frame.to_csv(raw_frame_path, index=False)
+    cleaned_frame.to_csv(cleaned_frame_path, index=False)
+    feature_frame.to_csv(feature_frame_path, index=False)
+
+    execution_result = {
+        "workspace_path": str(tmp_path),
+        "raw_frame_path": str(raw_frame_path),
+        "artifacts": {
+            "cleaned_frame.csv": str(cleaned_frame_path),
+            "feature_frame.csv": str(feature_frame_path),
+        },
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+            "Credit_History_Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+            "Type_of_Loan": {
+                "action": "keep",
+                "semantic_role": "multi_value_set",
+                "representation_intent": "binary_membership",
+                "cleaning": "create Type_of_Loan_missing for Not Specified",
+            },
+        }
+    }
+
+    report = normalize_preprocessing_artifacts(execution_result, column_transform_spec)
+    normalized = pd.read_csv(feature_frame_path)
+
+    assert report["applied"] is True
+    assert "Age" in report["normalized_columns"]
+    assert normalized["Age"].tolist() == [23.0, 23.0, 45.0]
+    max_months = (normalized["Age"] - 18).clip(lower=0) * 12 * 1.1
+    assert (normalized["Credit_History_Age"] <= max_months).all()
+    assert "Type_of_Loan_Not Specified" not in normalized.columns
+    assert normalized.loc[1, "Type_of_Loan_missing"] == 1
+    assert normalized.loc[1, "Type_of_Loan_Auto Loan"] == 0
+
+
+def test_normalize_preprocessing_artifacts_handles_fractional_group_median_without_crashing(tmp_path):
+    raw_frame = pd.DataFrame(
+        {
+            "Customer_ID": ["C1", "C1", "C1", "C2"],
+            "Credit_Score": ["Good", "Good", "Good", "Poor"],
+            "Age": ["40", "40", "40", "50"],
+            "Credit_History_Age": [
+                "1 Years and 0 Months",
+                "2 Years and 1 Months",
+                None,
+                "10 Years and 0 Months",
+            ],
+        }
+    )
+    feature_frame = pd.DataFrame(
+        {
+            "Age": [40.0, 40.0, 40.0, 50.0],
+            "Credit_History_Age": [12.0, 25.0, 120.0, 120.0],
+        }
+    )
+    raw_frame_path = tmp_path / "raw_frame.csv"
+    feature_frame_path = tmp_path / "feature_frame.csv"
+    raw_frame.to_csv(raw_frame_path, index=False)
+    feature_frame.to_csv(feature_frame_path, index=False)
+
+    execution_result = {
+        "workspace_path": str(tmp_path),
+        "raw_frame_path": str(raw_frame_path),
+        "artifacts": {
+            "feature_frame.csv": str(feature_frame_path),
+        },
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+            "Credit_History_Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+        }
+    }
+
+    report = normalize_preprocessing_artifacts(execution_result, column_transform_spec)
+    normalized = pd.read_csv(feature_frame_path)
+
+    assert report["applied"] is True
+    assert report["skipped"] == []
+    assert normalized.loc[2, "Credit_History_Age"] == 18.0
+
+
+def test_validate_preprocessing_output_auto_normalizes_deterministic_columns(tmp_path):
+    raw_frame = pd.DataFrame(
+        {
+            "Customer_ID": ["C1", "C1", "C2", "C2"],
+            "Credit_Score": ["Good", "Good", "Poor", "Poor"],
+            "Age": ["21", "21", "45", "45"],
+            "Credit_History_Age": [
+                "30 Years and 8 Months",
+                "8 Years and 9 Months",
+                "19 Years and 11 Months",
+                "20 Years and 0 Months",
+            ],
+            "Type_of_Loan": [
+                "Not Specified",
+                None,
+                "Home Loan, Personal Loan",
+                "Home Loan",
+            ],
+        }
+    )
+    cleaned_frame = pd.DataFrame(
+        {
+            "Age": [21.0, 21.0, 45.0, 45.0],
+            "Credit_History_Age": [87.0, 87.0, 87.0, 87.0],
+        }
+    )
+    feature_frame = pd.DataFrame(
+        {
+            "Age": [21.0, 21.0, 45.0, 45.0],
+            "Credit_History_Age": [87.0, 87.0, 87.0, 87.0],
+            "Type_of_Loan_missing": [1, 0, 0, 0],
+            "Type_of_Loan_Not Specified": [1, 1, 0, 0],
+            "Type_of_Loan_Home Loan": [0, 1, 1, 1],
+            "Type_of_Loan_Personal Loan": [0, 0, 1, 0],
+        }
+    )
+
+    raw_frame_path = tmp_path / "raw_frame.csv"
+    cleaned_frame_path = tmp_path / "cleaned_frame.csv"
+    feature_frame_path = tmp_path / "feature_frame.csv"
+    target_path = tmp_path / "target.csv"
+    split_manifest_path = tmp_path / "split_manifest.json"
+    report_path = tmp_path / "preprocessing_report.json"
+    raw_frame.to_csv(raw_frame_path, index=False)
+    cleaned_frame.to_csv(cleaned_frame_path, index=False)
+    feature_frame.to_csv(feature_frame_path, index=False)
+    raw_frame["Credit_Score"].to_frame().to_csv(target_path, index=False)
+    split_manifest_path.write_text(json.dumps({"train_indices": [0, 1], "test_indices": [2, 3]}), encoding="utf-8")
+    report_path.write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+
+    execution_result = {
+        "workspace_path": str(tmp_path),
+        "raw_frame_path": str(raw_frame_path),
+        "artifacts": {
+            "cleaned_frame.csv": str(cleaned_frame_path),
+            "feature_frame.csv": str(feature_frame_path),
+            "target.csv": str(target_path),
+            "split_manifest.json": str(split_manifest_path),
+            "preprocessing_report.json": str(report_path),
+        },
+        "execution_log": {"returncode": 0, "timed_out": False},
+    }
+    dataset_policy_spec = {
+        "target_column": "Credit_Score",
+        "group_column": "Customer_ID",
+        "split_strategy": {"type": "grouped_holdout", "test_size": 0.5},
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Credit_Score": {"action": "drop", "semantic_role": "target"},
+            "Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+            "Credit_History_Age": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "cleaning": "extract '(\\d+) Years and (\\d+) Months', compute years*12+months, mark values >1200 as NaN",
+            },
+            "Type_of_Loan": {
+                "action": "keep",
+                "semantic_role": "multi_value_set",
+                "representation_intent": "binary_membership",
+                "cleaning": "create Type_of_Loan_missing when original is NaN or 'Not Specified', then multi_hot",
+            },
+        }
+    }
+
+    result = validate_preprocessing_output(
+        execution_result,
+        dataset_policy_spec,
+        column_transform_spec,
+    )
+
+    assert result["passed"] is True, result["errors"] + result["role_violations"] + result["cross_field_violations"]
+    assert result["deterministic_normalization"]["applied"] is True
+    assert set(result["deterministic_normalization"]["normalized_columns"]) == {"Age", "Credit_History_Age", "Type_of_Loan"}
 
 
 # ---------------------------------------------------------------------------

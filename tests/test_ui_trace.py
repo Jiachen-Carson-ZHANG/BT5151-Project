@@ -1,6 +1,7 @@
 """Tests for ui_trace pure log-parsing helpers."""
 
 import json
+import os
 from pathlib import Path
 
 
@@ -81,6 +82,25 @@ def test_parse_stage_log_extracts_token_summary(tmp_path):
     trace = parse_stage_log(log_path)
     assert trace["run_summary"]["total_llm_calls"] == 7
     assert trace["run_summary"]["total_tokens"] == 150000
+
+
+def test_parse_stage_log_synthesizes_run_start_and_run_complete(tmp_path):
+    from bt5151_credit_risk.ui_trace import parse_stage_log
+
+    log_path = tmp_path / "stage_success.log"
+    log_path.write_text(
+        "12:00:00 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===\n"
+        "12:00:01 INFO    bt5151_credit_risk.graph  >>> recommend-action\n"
+        "12:00:02 INFO    bt5151_credit_risk.graph      action: standard_handling\n"
+        "12:00:03 INFO    run_stage  === Stage 'full' completed in 3.0s ===\n",
+        encoding="utf-8",
+    )
+
+    trace = parse_stage_log(log_path)
+    node_names = [card["node_name"] for card in trace["cards"]]
+
+    assert node_names[0] == "run_start"
+    assert node_names[-1] == "run_complete"
 
 
 def test_parse_stage_log_missing_file_returns_empty_trace():
@@ -222,5 +242,171 @@ def test_parse_structured_trace_jsonl_includes_lifecycle_events(tmp_path):
 
     assert any(card["node_name"] == "run_complete" for card in trace["cards"])
     assert any(card["node_name"] == "cache_saved" for card in trace["cards"])
-    assert "Lifecycle event: run_complete" in md
-    assert "Lifecycle event: cache_saved" in md
+    assert "Lifecycle event" in md and "run_complete" in md
+    assert "Lifecycle event" in md and "cache_saved" in md
+
+
+def test_build_pipeline_html_renders_retry_nodes_in_execution_order(tmp_path):
+    """Conditional repair-loop nodes should appear where they ran, not at the bottom."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_trace_artifact
+
+    trace_path = tmp_path / "trace_events_retry.jsonl"
+    events = [
+        {"event_type": "run_start", "status": "pass", "node": "__run__"},
+        {"event_type": "node_complete", "node": "generate-preprocessing-code", "status": "pass"},
+        {"event_type": "node_complete", "node": "inspect-preprocessing-code", "status": "pass"},
+        {"event_type": "node_complete", "node": "execute-generated-preprocessing", "status": "pass"},
+        {"event_type": "node_complete", "node": "validate-preprocessing-output", "status": "fail"},
+        {"event_type": "node_complete", "node": "review-preprocessing-quality", "status": "pass"},
+        {"event_type": "node_complete", "node": "repair-preprocessing-code", "status": "pass"},
+        {"event_type": "node_complete", "node": "inspect-preprocessing-code", "status": "pass"},
+        {"event_type": "node_complete", "node": "execute-generated-preprocessing", "status": "pass"},
+        {"event_type": "node_complete", "node": "validate-preprocessing-output", "status": "pass"},
+        {"event_type": "node_complete", "node": "review-preprocessing-quality", "status": "pass"},
+        {"event_type": "node_complete", "node": "generate-feature-engineering-code", "status": "pass"},
+    ]
+    trace_path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+    trace = parse_trace_artifact(trace_path)
+    html = build_pipeline_html(trace)
+
+    first_validate = html.index("validate‑preprocessing‑output")
+    repair = html.index("repair‑preprocessing‑code")
+    second_validate = html.rindex("validate‑preprocessing‑output")
+    generate_fe = html.index("generate‑feature‑engineering‑code")
+
+    assert first_validate < repair < second_validate < generate_fe
+    assert "preprocess</div>" not in html
+
+
+def test_build_pipeline_html_shows_terminal_run_failed_event(tmp_path):
+    """A structured run_failed lifecycle event must be visible in the pipeline rail."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_trace_artifact
+
+    trace_path = tmp_path / "trace_events_failed.jsonl"
+    events = [
+        {"event_type": "run_start", "status": "pass", "node": "__run__"},
+        {"event_type": "node_complete", "node": "generate-preprocessing-code", "status": "pass"},
+        {"event_type": "node_complete", "node": "validate-preprocessing-output", "status": "fail"},
+        {"event_type": "run_failed", "status": "fail", "node": "__run__", "error": "validation never passed"},
+    ]
+    trace_path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+    trace = parse_trace_artifact(trace_path)
+    html = build_pipeline_html(trace)
+
+    assert "run‑failed" in html
+    assert "generate‑feature‑engineering‑code" not in html
+
+
+def test_build_pipeline_html_shows_completed_run_as_finished_not_running(tmp_path):
+    """Completed raw stage logs should show lifecycle start/end nodes and no blue spinner."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_stage_log
+
+    log_path = tmp_path / "stage_success.log"
+    log_path.write_text(
+        "12:00:00 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===\n"
+        "12:00:01 INFO    bt5151_credit_risk.graph  >>> recommend-action\n"
+        "12:00:02 INFO    bt5151_credit_risk.graph      action: standard_handling\n"
+        "12:00:03 INFO    run_stage  === Stage 'full' completed in 3.0s ===\n",
+        encoding="utf-8",
+    )
+
+    trace = parse_stage_log(log_path)
+    html = build_pipeline_html(trace)
+
+    assert "run‑start" in html
+    assert "run‑complete" in html
+    assert 'class="pulsing"' not in html
+
+
+def test_build_pipeline_html_shows_run_start_for_in_progress_raw_log(tmp_path):
+    """In-progress raw logs should include a green run-start node plus a blue current node."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_stage_log
+
+    log_path = tmp_path / "stage_running.log"
+    log_path.write_text(
+        "12:00:00 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===\n"
+        "12:00:01 INFO    bt5151_credit_risk.graph  >>> train-models\n"
+        "12:00:02 INFO    bt5151_credit_risk.graph      fitting xgboost\n",
+        encoding="utf-8",
+    )
+
+    trace = parse_stage_log(log_path)
+    html = build_pipeline_html(trace)
+
+    assert "run‑start" in html
+    assert "train‑models" in html
+    assert 'class="pulsing"' in html
+
+
+def test_live_trace_uses_structured_completion_status_for_last_raw_node(tmp_path):
+    """Live raw logs should not show a node as running after JSONL records completion."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_live_trace_artifacts
+
+    log_path = tmp_path / "stage_full_20260417_190732.log"
+    log_path.write_text(
+        "19:30:00 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===\n"
+        "19:31:02 INFO    bt5151_credit_risk.graph  >>> global-xai\n"
+        "19:31:02 INFO    bt5151_credit_risk.graph      SHAP reused from select-model (skipping recomputation)\n"
+        "19:39:35 INFO    bt5151_credit_risk.graph      methods used: ['shap', 'pfi_grouped', 'pdp', 'ale']\n",
+        encoding="utf-8",
+    )
+    trace_path = tmp_path / "trace_events_20260417_190732.jsonl"
+    events = [
+        {"event_type": "run_start", "status": "pass", "node": "__run__"},
+        {"event_type": "node_complete", "node": "global-xai", "status": "pass"},
+    ]
+    trace_path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+    trace = parse_live_trace_artifacts(log_path, trace_path)
+    html = build_pipeline_html(trace)
+
+    assert "global‑xai" in html
+    assert "local‑xai" in html
+    assert 'class="pulsing"' not in html
+
+
+def test_live_trace_marks_raw_node_after_last_jsonl_completion_as_running(tmp_path):
+    """If raw log has advanced past JSONL completion, only the new raw node is running."""
+    from bt5151_credit_risk.ui_trace import build_pipeline_html, parse_live_trace_artifacts
+
+    log_path = tmp_path / "stage_full_20260417_190732.log"
+    log_path.write_text(
+        "19:30:00 INFO    run_stage  === Stage 'full' (stop_after=END, row_index=42) ===\n"
+        "19:31:02 INFO    bt5151_credit_risk.graph  >>> global-xai\n"
+        "19:39:35 INFO    bt5151_credit_risk.graph      methods used: ['shap', 'pfi_grouped']\n"
+        "19:39:35 INFO    bt5151_credit_risk.graph  >>> local-xai (casebook)\n",
+        encoding="utf-8",
+    )
+    trace_path = tmp_path / "trace_events_20260417_190732.jsonl"
+    events = [
+        {"event_type": "run_start", "status": "pass", "node": "__run__"},
+        {"event_type": "node_complete", "node": "global-xai", "status": "pass"},
+    ]
+    trace_path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+
+    trace = parse_live_trace_artifacts(log_path, trace_path)
+    html = build_pipeline_html(trace)
+
+    assert "global‑xai" in html
+    assert "local‑xai" in html
+    assert 'class="pulsing"' in html
+
+
+def test_list_available_logs_orders_history_by_recency_not_file_type(tmp_path):
+    """Recent raw stage logs should not be buried below all JSONL traces."""
+    from bt5151_credit_risk.ui_trace import list_available_logs
+
+    older_trace = tmp_path / "trace_events_20260416_010000.jsonl"
+    older_trace.write_text("{}\n", encoding="utf-8")
+    newer_log = tmp_path / "stage_full_20260416_020000.log"
+    newer_log.write_text("12:00:00 INFO    bt5151_credit_risk.graph  >>> train-models\n", encoding="utf-8")
+
+    os.utime(older_trace, (100, 100))
+    os.utime(newer_log, (200, 200))
+
+    names = list_available_logs(tmp_path)
+
+    assert names[0] == newer_log.name
+    assert older_trace.name in names

@@ -1,3 +1,4 @@
+import ast
 import json
 import subprocess
 import sys
@@ -71,6 +72,7 @@ def generate_feature_engineering_code(
     dataset_profile: dict,
     eda_report: dict | None = None,
     eda_hypotheses: dict | None = None,
+    deferred_categorical_columns: dict | None = None,
 ) -> dict:
     system_prompt = load_skill_prompt("generate-feature-engineering-code")
     payload = {
@@ -81,6 +83,8 @@ def generate_feature_engineering_code(
         "test_rows": len(test_frame),
         "dataset_profile": dataset_profile,
     }
+    if deferred_categorical_columns:
+        payload["deferred_categorical_columns"] = deferred_categorical_columns
     if eda_report:
         payload["eda_insights"] = {
             "top_discriminative_features": eda_report.get("top_discriminative_features", [])[:10],
@@ -104,6 +108,7 @@ def repair_feature_engineering_code(
     validation_report: dict | None,
     feature_columns: list[str],
     dataset_profile: dict,
+    deferred_categorical_columns: dict | None = None,
 ) -> dict:
     system_prompt = load_skill_prompt("repair-feature-engineering-code")
     payload = {
@@ -114,7 +119,156 @@ def repair_feature_engineering_code(
         "feature_columns": feature_columns,
         "dataset_profile": dataset_profile,
     }
+    if deferred_categorical_columns:
+        payload["deferred_categorical_columns"] = deferred_categorical_columns
     return _call_fe_codegen_agent(system_prompt, payload, caller="repair-feature-engineering-code")
+
+
+def deterministic_feature_engineering_fallback_code(
+    *,
+    reason: str | None = None,
+    fallback_used: bool = True,
+) -> dict:
+    """Return conservative FE code that preserves rows and encodes categoricals.
+
+    This is the pipeline seatbelt: if LLM-generated FE code repeatedly crashes,
+    continue with a simple deterministic representation rather than failing the
+    whole run. It intentionally avoids clever ratios/drops; preprocessing already
+    produced the main signal-bearing columns.
+    """
+    reason = reason or (
+        "LLM feature-engineering repair attempts were exhausted; using deterministic "
+        "pass-through + categorical encoding."
+    )
+    code = r'''
+import json
+import numpy as np
+import pandas as pd
+from pathlib import Path
+
+
+def engineer_features(train_df, test_df, workspace_path):
+    workspace_path = Path(workspace_path)
+    report = {
+        "dropped": [],
+        "transformed": [],
+        "added": [],
+        "fallback": {
+            "used": __FE_FALLBACK_USED__,
+            "reason": __FE_FALLBACK_REASON__
+        },
+    }
+    lineage = {"derived_features": [], "dropped_features": [], "passthrough_features": []}
+
+    train_df = train_df.copy()
+    test_df = test_df.copy()
+    deferred = globals().get("deferred_categorical_columns", {}) or {}
+    object_cols = list(train_df.select_dtypes(exclude=["number", "bool"]).columns)
+    for col in object_cols:
+        nunique = int(deferred.get(col, train_df[col].nunique(dropna=True)))
+        if nunique <= 20:
+            train_values = train_df[col].fillna("__MISSING__").astype(str)
+            test_values = test_df[col].fillna("__MISSING__").astype(str)
+            dummies = pd.get_dummies(train_values, prefix=col, dtype=int)
+            test_dummies = pd.get_dummies(test_values, prefix=col, dtype=int)
+            test_dummies = test_dummies.reindex(columns=dummies.columns, fill_value=0)
+            train_df = pd.concat([train_df.drop(columns=[col]), dummies], axis=1)
+            test_df = pd.concat([test_df.drop(columns=[col]), test_dummies], axis=1)
+            report["transformed"].append({
+                "column": col,
+                "transform": "one_hot",
+                "rationale": "deterministic fallback encoding for deferred categorical"
+            })
+            lineage["derived_features"].append({
+                "feature": col,
+                "operation": "one_hot",
+                "inputs": [col],
+                "input_stage": "pre_fe_raw_categorical",
+            })
+        else:
+            freq = train_df[col].fillna("__MISSING__").astype(str).value_counts(normalize=True).to_dict()
+            train_df[col] = train_df[col].fillna("__MISSING__").astype(str).map(freq).fillna(0.0)
+            test_df[col] = test_df[col].fillna("__MISSING__").astype(str).map(freq).fillna(0.0)
+            report["transformed"].append({
+                "column": col,
+                "transform": "frequency_encode",
+                "rationale": "deterministic fallback compact encoding for high-cardinality categorical"
+            })
+            lineage["derived_features"].append({
+                "feature": col,
+                "operation": "frequency_encode",
+                "inputs": [col],
+                "input_stage": "pre_fe_raw_categorical",
+            })
+
+    # Coerce any remaining bools/numerics safely and fill using train statistics.
+    all_columns = list(train_df.columns)
+    for col in all_columns:
+        if col not in test_df.columns:
+            test_df[col] = 0
+        if train_df[col].dtype == bool:
+            train_df[col] = train_df[col].astype(int)
+            test_df[col] = test_df[col].astype(int)
+        else:
+            train_df[col] = pd.to_numeric(train_df[col], errors="coerce")
+            test_df[col] = pd.to_numeric(test_df[col], errors="coerce")
+        clean_train = train_df[col].replace([np.inf, -np.inf], np.nan)
+        median = clean_train.median()
+        if pd.isna(median):
+            median = 0.0
+        train_df[col] = clean_train.fillna(float(median))
+        test_df[col] = test_df[col].replace([np.inf, -np.inf], np.nan).fillna(float(median))
+
+    # Align test to train exactly; drop unexpected test-only columns.
+    test_df = test_df.reindex(columns=train_df.columns, fill_value=0)
+
+    one_hot_parents = {
+        entry["feature"]
+        for entry in lineage["derived_features"]
+        if entry.get("operation") == "one_hot"
+    }
+    derived_exact = {
+        entry["feature"]
+        for entry in lineage["derived_features"]
+        if entry.get("operation") != "one_hot"
+    }
+    passthrough = []
+    for col in train_df.columns:
+        if col in derived_exact:
+            continue
+        if any(col.startswith(f"{parent}_") for parent in one_hot_parents):
+            continue
+        passthrough.append(col)
+    lineage["passthrough_features"] = passthrough
+
+    non_num_train = train_df.select_dtypes(exclude=["number", "bool"]).columns.tolist()
+    non_num_test = test_df.select_dtypes(exclude=["number", "bool"]).columns.tolist()
+    assert not non_num_train, f"Non-numeric columns in train: {non_num_train}"
+    assert not non_num_test, f"Non-numeric columns in test: {non_num_test}"
+
+    train_df.to_csv(workspace_path / "engineered_train.csv", index=False)
+    test_df.to_csv(workspace_path / "engineered_test.csv", index=False)
+    (workspace_path / "feature_engineering_report.json").write_text(json.dumps(report, indent=2))
+    (workspace_path / "feature_lineage.json").write_text(json.dumps(lineage, indent=2))
+'''
+    code = code.replace("__FE_FALLBACK_USED__", repr(bool(fallback_used)))
+    code = code.replace("__FE_FALLBACK_REASON__", json.dumps(reason))
+    return {
+        "code": code,
+        "entrypoint": "engineer_features",
+        "hypothesis": {
+            "interactions_rationale": (
+                "Deterministic feature engineering: no new interactions are added; the "
+                "priority is to preserve validated preprocessing features and unblock "
+                "model training."
+            ),
+            "dropped_features_rationale": "No features are dropped by the fallback.",
+            "expected_impact": (
+                "Expected to be a stable baseline, possibly lower-performing than successful "
+                "LLM FE, but preferable to failing the end-to-end pipeline."
+            ),
+        },
+    }
 
 
 # Run feature engineering code in a subprocess, writing output CSVs.
@@ -123,6 +277,7 @@ def execute_feature_engineering(
     test_frame: pd.DataFrame,
     generated_code: dict,
     run_root,
+    deferred_categorical_columns: dict | None = None,
 ) -> dict:
     entrypoint_name = generated_code.get("entrypoint", "engineer_features")
     run_root_path = Path(run_root)
@@ -135,15 +290,18 @@ def execute_feature_engineering(
     test_path = workspace_path / "input_test.csv"
     code_path = workspace_path / "generated_feature_engineering.py"
     runner_path = workspace_path / "_execute_feature_engineering.py"
+    deferred_path = workspace_path / "deferred_categorical_columns.json"
 
     train_frame.to_csv(train_path, index=False)
     test_frame.to_csv(test_path, index=False)
     code_path.write_text(generated_code.get("code", ""), encoding="utf-8")
+    deferred_path.write_text(json.dumps(deferred_categorical_columns or {}), encoding="utf-8")
 
     runner_path.write_text(
         "\n".join(
             [
                 "import importlib.util",
+                "import json",
                 "import sys",
                 "from pathlib import Path",
                 "",
@@ -155,11 +313,13 @@ def execute_feature_engineering(
                 "    train_path = Path(sys.argv[2])",
                 "    test_path = Path(sys.argv[3])",
                 "    workspace_path = Path(sys.argv[4])",
+                "    deferred_path = Path(sys.argv[5])",
                 f"    entrypoint_name = {entrypoint_name!r}",
                 '    spec = importlib.util.spec_from_file_location("generated_feature_engineering", code_path)',
                 "    module = importlib.util.module_from_spec(spec)",
                 "    assert spec.loader is not None",
                 "    spec.loader.exec_module(module)",
+                "    module.deferred_categorical_columns = json.loads(deferred_path.read_text(encoding='utf-8'))",
                 "    entrypoint = getattr(module, entrypoint_name, None)",
                 "    if not callable(entrypoint):",
                 "        raise AttributeError(f\"Entrypoint '{entrypoint_name}' was not found or is not callable.\")",
@@ -179,7 +339,15 @@ def execute_feature_engineering(
     timeout_seconds = 120
     try:
         completed = subprocess.run(
-            [sys.executable, str(runner_path), str(code_path), str(train_path), str(test_path), str(workspace_path)],
+            [
+                sys.executable,
+                str(runner_path),
+                str(code_path),
+                str(train_path),
+                str(test_path),
+                str(workspace_path),
+                str(deferred_path),
+            ],
             cwd=workspace_path,
             capture_output=True,
             text=True,
@@ -245,9 +413,14 @@ def execute_feature_engineering(
 # Allowed enumerations for lineage manifest — rejected if anything else appears.
 _LINEAGE_ALLOWED_OPERATIONS = {
     "ratio", "product", "sum", "difference", "log1p", "bin", "interaction",
-    "passthrough", "one_hot", "frequency_encode",
+    "passthrough", "one_hot", "frequency_encode", "frequency_encoding",
 }
-_LINEAGE_ALLOWED_INPUT_STAGES = {"pre_fe_raw_numeric", "pre_fe_encoded", "fe_derived"}
+_LINEAGE_ALLOWED_INPUT_STAGES = {
+    "pre_fe_raw_numeric",
+    "pre_fe_encoded",
+    "pre_fe_raw_categorical",
+    "fe_derived",
+}
 _LINEAGE_ALLOWED_DROP_REASONS = {
     "leakage", "deterministic_duplicate", "constant", "correlation_with_higher_mi_feature",
 }
@@ -255,6 +428,159 @@ _LINEAGE_ALLOWED_DROP_REASONS = {
 _LINEAGE_RAW_PARENT_OPS = {"ratio", "product", "sum", "difference", "interaction"}
 # Operations the replay check actually recomputes row-by-row.
 _LINEAGE_REPLAY_OPS = {"ratio", "product", "sum", "difference", "log1p"}
+
+
+class _FormulaReplayError(ValueError):
+    """Raised when a report formula cannot be safely replayed."""
+
+
+def _feature_formula_map(report: dict | None) -> dict[str, str]:
+    """Extract exact engineered-feature formulas from the FE report."""
+    if not isinstance(report, dict):
+        return {}
+    formulas: dict[str, str] = {}
+    for section in ("added", "transformed"):
+        entries = report.get(section) or []
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            column = entry.get("column")
+            formula = entry.get("formula")
+            if isinstance(column, str) and isinstance(formula, str) and formula.strip():
+                formulas[column] = formula.strip()
+    return formulas
+
+
+def _subscript_key(node: ast.AST) -> str:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    raise _FormulaReplayError("only string column subscripts are supported")
+
+
+def _eval_formula_ast(node: ast.AST, frame: pd.DataFrame):
+    """Safely evaluate a small arithmetic expression over DataFrame columns.
+
+    Supported formulas intentionally cover the FE contract language only:
+    column names, df["column"] lookups, numeric constants, +, -, *, /, unary
+    signs, and log1p. No arbitrary attribute access or function calls.
+    """
+    if isinstance(node, ast.Expression):
+        return _eval_formula_ast(node.body, frame)
+
+    if isinstance(node, ast.Name):
+        if node.id in frame.columns:
+            return pd.to_numeric(frame[node.id], errors="coerce")
+        raise _FormulaReplayError(f"unknown formula symbol {node.id!r}")
+
+    if isinstance(node, ast.Constant):
+        if isinstance(node.value, (int, float)):
+            return float(node.value)
+        raise _FormulaReplayError(f"unsupported constant {node.value!r}")
+
+    if isinstance(node, ast.Subscript):
+        if not isinstance(node.value, ast.Name) or node.value.id not in {
+            "df", "data", "frame", "train_df", "base_train",
+        }:
+            raise _FormulaReplayError("only df['column']-style subscripts are supported")
+        key = _subscript_key(node.slice)
+        if key not in frame.columns:
+            raise _FormulaReplayError(f"formula references missing column {key!r}")
+        return pd.to_numeric(frame[key], errors="coerce")
+
+    if isinstance(node, ast.UnaryOp):
+        operand = _eval_formula_ast(node.operand, frame)
+        if isinstance(node.op, ast.USub):
+            return -operand
+        if isinstance(node.op, ast.UAdd):
+            return operand
+        raise _FormulaReplayError("unsupported unary operator")
+
+    if isinstance(node, ast.BinOp):
+        left = _eval_formula_ast(node.left, frame)
+        right = _eval_formula_ast(node.right, frame)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            if isinstance(node.op, ast.Add):
+                return left + right
+            if isinstance(node.op, ast.Sub):
+                return left - right
+            if isinstance(node.op, ast.Mult):
+                return left * right
+            if isinstance(node.op, ast.Div):
+                return left / right
+        raise _FormulaReplayError("unsupported binary operator")
+
+    if isinstance(node, ast.Call):
+        func_name = None
+        if isinstance(node.func, ast.Name):
+            func_name = node.func.id
+        elif (
+            isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "np"
+        ):
+            func_name = node.func.attr
+        if func_name != "log1p" or len(node.args) != 1 or node.keywords:
+            raise _FormulaReplayError("only log1p(x) formulas are supported")
+        arg = _eval_formula_ast(node.args[0], frame)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            return np.log1p(arg)
+
+    raise _FormulaReplayError(f"unsupported formula syntax {type(node).__name__}")
+
+
+def _evaluate_feature_formula(formula: str, frame: pd.DataFrame) -> pd.Series:
+    try:
+        tree = ast.parse(formula, mode="eval")
+    except SyntaxError as exc:
+        raise _FormulaReplayError(f"invalid formula syntax: {exc}") from exc
+    value = _eval_formula_ast(tree, frame)
+    if isinstance(value, pd.Series):
+        return pd.to_numeric(value, errors="coerce").reset_index(drop=True)
+    try:
+        scalar = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _FormulaReplayError("formula did not produce numeric values") from exc
+    return pd.Series([scalar] * len(frame))
+
+
+def _lineage_expected_candidates(expected: pd.Series, entry: dict) -> list[pd.Series]:
+    """Build acceptable replay candidates for formulas with documented cleanup.
+
+    Generated FE often records a mathematically exact formula in
+    feature_engineering_report.json, then applies the lineage manifest's
+    fill/clip strategy for stability. The validator accepts the raw formula
+    and the documented stabilized variants, but still rejects unrelated math
+    such as log-transformed parents.
+    """
+    numeric = pd.to_numeric(expected, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    candidates = [numeric]
+
+    fill_strategy = str(entry.get("fill_strategy") or "").lower()
+    clip_strategy = str(entry.get("clip_strategy") or "").lower()
+    if fill_strategy or clip_strategy:
+        median = numeric.median()
+        if pd.isna(median):
+            median = 0.0
+        filled = numeric.fillna(float(median))
+        candidates.append(filled)
+
+        if "p99" in clip_strategy or "quantile" in clip_strategy or "winsor" in clip_strategy:
+            upper = filled.quantile(0.99)
+            if not pd.isna(upper):
+                candidates.append(filled.clip(upper=float(upper)))
+            lower = filled.quantile(0.01)
+            if not pd.isna(lower) and not pd.isna(upper):
+                candidates.append(filled.clip(lower=float(lower), upper=float(upper)))
+
+    return candidates
+
+
+def _values_close(expected: float, actual: float) -> bool:
+    if pd.isna(expected) or pd.isna(actual):
+        return False
+    return abs(expected - actual) <= max(1e-4, 1e-4 * abs(expected))
 
 
 def _apply_lineage_operation(operation: str, input_values: list[float]) -> float | None:
@@ -294,6 +620,7 @@ def validate_feature_lineage(
     train_frame_pre_fe: pd.DataFrame | None,
     engineered_train: pd.DataFrame,
     top_mi_features: list[str] | None,
+    feature_formulas: dict[str, str] | None = None,
 ) -> list[dict]:
     """Replay the declared lineage against the actual engineered train frame.
 
@@ -425,6 +752,7 @@ def validate_feature_lineage(
         )
 
     # --- Replay check: sample 20 rows, recompute arithmetic ops ---
+    feature_formulas = feature_formulas or {}
     if train_frame_pre_fe is not None and len(engineered_train) > 0:
         n_sample = min(20, len(engineered_train))
         # Align indices: engineered_train and train_frame_pre_fe must share
@@ -450,6 +778,58 @@ def validate_feature_lineage(
                     continue
                 if not isinstance(inputs, list):
                     continue
+
+                formula = feature_formulas.get(str(feature))
+                if formula:
+                    try:
+                        expected_series = _evaluate_feature_formula(formula, train_frame_pre_fe)
+                    except _FormulaReplayError as exc:
+                        record(
+                            "lineage_formula_replayable",
+                            f"Replay of {feature!r} could not parse/evaluate report formula "
+                            f"{formula!r}: {exc}. Use simple arithmetic over pre-FE column names.",
+                            feature=feature,
+                            formula=formula,
+                        )
+                        continue
+
+                    candidates = _lineage_expected_candidates(expected_series, entry)
+                    mismatches = []
+                    for pos in sample_idx:
+                        try:
+                            actual = float(engineered_train.iloc[int(pos)][feature])
+                        except (TypeError, ValueError, KeyError):
+                            continue
+                        if pd.isna(actual):
+                            continue
+                        expected_values = [
+                            float(candidate.iloc[int(pos)])
+                            for candidate in candidates
+                            if int(pos) < len(candidate)
+                        ]
+                        if not expected_values:
+                            continue
+                        if any(_values_close(expected, actual) for expected in expected_values):
+                            continue
+                        mismatches.append({
+                            "row_pos": int(pos),
+                            "expected": round(float(expected_values[0]), 6),
+                            "actual": round(float(actual), 6),
+                        })
+                    if mismatches:
+                        record(
+                            "lineage_replay_matches",
+                            f"Replay of {feature!r} using report formula {formula!r} disagrees "
+                            f"with the engineered output on {len(mismatches)}/{n_sample} "
+                            f"sampled rows. The code is likely computing something other than "
+                            f"the declared formula, or applying an undeclared transform.",
+                            feature=feature,
+                            operation=op,
+                            formula=formula,
+                            mismatch_sample=mismatches[:3],
+                        )
+                    continue
+
                 # All parents must exist in the pre-FE frame.
                 if any(parent not in train_frame_pre_fe.columns for parent in inputs):
                     continue
@@ -470,7 +850,7 @@ def validate_feature_lineage(
                         continue
                     if pd.isna(actual):
                         continue
-                    if abs(expected - actual) > max(1e-4, 1e-4 * abs(expected)):
+                    if not _values_close(float(expected), actual):
                         mismatches.append({
                             "row_pos": int(pos),
                             "expected": round(float(expected), 6),
@@ -544,8 +924,16 @@ def validate_feature_engineering_output(
             )
 
     report_path = Path(artifacts.get("feature_engineering_report.json", ""))
+    feature_formulas: dict[str, str] = {}
 
     add_check("report_file_exists", report_path.is_file(), "feature_engineering_report.json not found.")
+    if report_path.is_file():
+        try:
+            feature_formulas = _feature_formula_map(
+                json.loads(report_path.read_text(encoding="utf-8"))
+            )
+        except Exception:
+            feature_formulas = {}
 
     if view_metadata and isinstance(view_metadata.get("views"), dict):
         add_check("view_metadata_exists", True, "")
@@ -785,7 +1173,11 @@ def validate_feature_engineering_output(
     if lineage is not None and canonical_train is not None:
         try:
             extra = validate_feature_lineage(
-                lineage, train_frame_pre_fe, canonical_train, top_mi_features
+                lineage,
+                train_frame_pre_fe,
+                canonical_train,
+                top_mi_features,
+                feature_formulas=feature_formulas,
             )
             lineage_violations.extend(extra)
         except Exception as exc:  # pragma: no cover — defensive

@@ -5,8 +5,8 @@ import pandas as pd
 from bt5151_credit_risk.feature_engineering import validate_feature_engineering_output
 
 
-def _write_artifacts(tmp_path, train_df, test_df, view_metadata=None, lineage=None):
-    (tmp_path / "feature_engineering_report.json").write_text(json.dumps({}))
+def _write_artifacts(tmp_path, train_df, test_df, view_metadata=None, lineage=None, fe_report=None):
+    (tmp_path / "feature_engineering_report.json").write_text(json.dumps(fe_report or {}))
     if view_metadata:
         (tmp_path / "view_metadata.json").write_text(json.dumps(view_metadata))
         for view in view_metadata["views"].values():
@@ -360,6 +360,123 @@ def test_lineage_replay_accepts_correct_ratio(tmp_path):
         original_test_rows=len(engineered_test),
         original_feature_count=2,
         train_frame_pre_fe=pre_fe_train,
+    )
+
+    assert result["passed"] is True, result.get("lineage_violations", []) + result.get("errors", [])
+
+
+def test_lineage_replay_uses_report_formula_for_composed_features(tmp_path):
+    """Lineage operation names are coarse; the report formula is the exact contract.
+
+    Rich ratios like (salary - emi) / salary and debt * rate / 100 should replay
+    against their declared formula instead of the old a/b or a*b fallback.
+    """
+    pre_fe_train = pd.DataFrame({
+        "Monthly_Inhand_Salary": [1000.0, 2500.0, 4000.0, 6000.0, 8000.0] * 4,
+        "Total_EMI_per_month": [100.0, 500.0, 1000.0, 1200.0, 1600.0] * 4,
+        "Num_Credit_Inquiries": [1.0, 3.0, 5.0, 2.0, 8.0] * 4,
+        "Num_Credit_Card": [0.0, 2.0, 4.0, 1.0, 3.0] * 4,
+        "Outstanding_Debt": [500.0, 1000.0, 2500.0, 3000.0, 4500.0] * 4,
+        "Interest_Rate": [5.0, 10.0, 12.5, 18.0, 25.0] * 4,
+    })
+    engineered_train = pre_fe_train.copy()
+    engineered_train["Savings_Rate"] = (
+        pre_fe_train["Monthly_Inhand_Salary"] - pre_fe_train["Total_EMI_per_month"]
+    ) / pre_fe_train["Monthly_Inhand_Salary"]
+    engineered_train["Inquiries_per_Credit_Card"] = (
+        pre_fe_train["Num_Credit_Inquiries"] / (pre_fe_train["Num_Credit_Card"] + 1)
+    )
+    engineered_train["Interest_Burden"] = (
+        pre_fe_train["Outstanding_Debt"] * pre_fe_train["Interest_Rate"] / 100
+    )
+    engineered_test = engineered_train.iloc[:4].reset_index(drop=True)
+
+    lineage = {
+        "derived_features": [
+            {
+                "feature": "Savings_Rate",
+                "operation": "ratio",
+                "input_stage": "pre_fe_raw_numeric",
+                "inputs": ["Monthly_Inhand_Salary", "Total_EMI_per_month"],
+            },
+            {
+                "feature": "Inquiries_per_Credit_Card",
+                "operation": "ratio",
+                "input_stage": "pre_fe_raw_numeric",
+                "inputs": ["Num_Credit_Inquiries", "Num_Credit_Card"],
+            },
+            {
+                "feature": "Interest_Burden",
+                "operation": "product",
+                "input_stage": "pre_fe_raw_numeric",
+                "inputs": ["Outstanding_Debt", "Interest_Rate"],
+            },
+        ],
+        "passthrough_features": list(pre_fe_train.columns),
+        "dropped_features": [],
+    }
+    fe_report = {
+        "added": [
+            {
+                "column": "Savings_Rate",
+                "formula": "(Monthly_Inhand_Salary - Total_EMI_per_month) / Monthly_Inhand_Salary",
+            },
+            {
+                "column": "Inquiries_per_Credit_Card",
+                "formula": "Num_Credit_Inquiries / (Num_Credit_Card + 1)",
+            },
+            {
+                "column": "Interest_Burden",
+                "formula": "Outstanding_Debt * Interest_Rate / 100",
+            },
+        ]
+    }
+    artifacts = _write_artifacts(
+        tmp_path,
+        engineered_train,
+        engineered_test,
+        lineage=lineage,
+        fe_report=fe_report,
+    )
+
+    result = validate_feature_engineering_output(
+        {"artifacts": artifacts, "view_metadata": None},
+        original_train_rows=len(pre_fe_train),
+        original_test_rows=len(engineered_test),
+        original_feature_count=len(pre_fe_train.columns),
+        train_frame_pre_fe=pre_fe_train,
+    )
+
+    assert result["passed"] is True, result.get("lineage_violations", []) + result.get("errors", [])
+
+
+def test_lineage_accepts_generated_categorical_input_stage_alias(tmp_path):
+    """FE repairs sometimes declare one-hot parents as pre_fe_raw_categorical.
+
+    That spelling is semantically valid for deferred categoricals and should not
+    block an otherwise numeric one-hot output.
+    """
+    train_df = pd.DataFrame({"Age": [30.0, 40.0], "Occupation_Doctor": [1, 0]})
+    test_df = pd.DataFrame({"Age": [35.0], "Occupation_Doctor": [0]})
+    lineage = {
+        "derived_features": [
+            {
+                "feature": "Occupation",
+                "operation": "one_hot",
+                "input_stage": "pre_fe_raw_categorical",
+                "inputs": ["Occupation"],
+            }
+        ],
+        "passthrough_features": ["Age"],
+        "dropped_features": [],
+    }
+    artifacts = _write_artifacts(tmp_path, train_df, test_df, lineage=lineage)
+
+    result = validate_feature_engineering_output(
+        {"artifacts": artifacts, "view_metadata": None},
+        original_train_rows=2,
+        original_test_rows=1,
+        original_feature_count=2,
     )
 
     assert result["passed"] is True, result.get("lineage_violations", []) + result.get("errors", [])

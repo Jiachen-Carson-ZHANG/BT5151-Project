@@ -58,6 +58,29 @@ Before writing code, analyze the inputs and form a hypothesis. Consider:
 
 Your reasoning feeds directly into the `hypothesis` field of the output. Every decision in your code should trace back to this analysis.
 
+## MANDATORY: Encode deferred categorical columns
+
+If `deferred_categorical_columns` is present in your inputs, it is a dict mapping `{column_name: nunique_on_train}` for every column that preprocessing left as object-dtype and explicitly delegated to FE for encoding. **You must encode every listed column in every view you emit.** A view that ships any of these columns as object-dtype will fail validation immediately.
+
+Encoding rules (use train-only statistics, apply to both train and test frames):
+
+| `nunique` (train) | `linear_view` | `tree_view` |
+|---|---|---|
+| ≤ 20 | one-hot (drop first dummy) | one-hot (drop first dummy) |
+| 21–50 | one-hot | frequency encode |
+| > 50 | frequency encode | frequency encode |
+
+Frequency encoding pattern — compute the map from train only, then apply to test:
+```python
+freq_map = train_df[col].value_counts(normalize=True).to_dict()
+train_df[col] = train_df[col].map(freq_map).fillna(0.0)
+test_df[col] = test_df[col].map(freq_map).fillna(0.0)
+```
+
+This encoding step belongs at position 7 in the Required code order (after building views, before log transforms and final cleanup). Assert both frames are fully numeric before writing each view's CSV.
+
+Every deferred column and its one-hot expansions must appear in `feature_lineage.json` with `operation: "one_hot"` or `operation: "frequency_encode"`.
+
 ## Technical guardrails
 
 These are non-negotiable correctness rules. They protect against bugs, not against bad judgment — that's what the reasoning phase is for.
@@ -176,6 +199,8 @@ Inside that function, prefer writing these dual-view artifacts into `workspace_p
 - `engineered_train_tree.csv`
 - `engineered_test_tree.csv`
 - `feature_engineering_report.json` — shared summary of what was added/removed/transformed and why. **Each entry must appear exactly once** — do not append the same column to `added`/`dropped`/`transformed` once per view. The report is view-agnostic; note which views a feature belongs to inside the entry's `rationale` field if needed.
+  - For every derived numeric feature, include an exact replayable `formula` string using only pre-FE column names, numeric constants, parentheses, `+`, `-`, `*`, `/`, and optional `log1p(...)`.
+  - The validator deterministically replays this formula against the pre-FE train frame. If the code computes `Outstanding_Debt * Interest_Rate / 100`, the report formula must be exactly `"Outstanding_Debt * Interest_Rate / 100"` — not just `"Outstanding_Debt * Interest_Rate"`.
 - `view_metadata.json` — describes which artifacts belong to which view
 
 `view_metadata.json` should look like:
@@ -243,7 +268,7 @@ Hard rules the validator enforces:
 
 1. **Ratios, products, sums, differences, and interactions must use `input_stage: pre_fe_raw_numeric`.** No ratio can be built from a log-transformed column. Compute ratios first, log second.
 2. Every output column must appear in `derived_features`, `passthrough_features`, or as an expansion of a `one_hot` entry (columns named `<feature>_<value>`).
-3. The validator samples 20 rows and recomputes each `ratio`, `product`, `sum`, `difference`, or `log1p` feature from the named raw parents. Lineage that disagrees with the actual output fails the run.
+3. The validator samples 20 rows and recomputes each `ratio`, `product`, `sum`, `difference`, or `log1p` feature from the exact `feature_engineering_report.json` formula when available, otherwise from the coarse lineage operation. Lineage/formula that disagrees with the actual output fails the run.
 4. Top-5 MI features can only appear in `dropped_features` with `drop_reason ∈ {leakage, deterministic_duplicate}`. Any other reason fails validation.
 
 ## Allowed imports

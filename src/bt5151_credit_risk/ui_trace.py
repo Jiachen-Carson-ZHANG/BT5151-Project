@@ -6,6 +6,7 @@ without a running Gradio server.
 
 import json
 import re
+import html
 from pathlib import Path
 from typing import Any
 
@@ -14,31 +15,51 @@ _NODE_START_RE = re.compile(r">>> ([\w-]+)")
 _LLM_CALLS_RE = re.compile(r"Total LLM calls:\s*(\d+)")
 _TOTAL_TOKENS_RE = re.compile(r"Total tokens:\s*(\d+)")
 _TOKEN_SUMMARY_START = "--- Token usage summary ---"
+_RUN_STAGE_START_RE = re.compile(r"=== Stage '([^']+)' \(stop_after=.*\) ===")
+_RUN_STAGE_COMPLETE_RE = re.compile(r"=== Stage '([^']+)' completed in ([^=]+) ===")
 
-# Canonical pipeline stage order — used for the node-edge visualization.
-# Names must match the node names emitted by >>> markers in the log.
+# Main-path pipeline stage order — used for pending-node visualization.
+# Conditional repair nodes are rendered from actual trace events instead of
+# being pre-rendered as grey boxes, otherwise retry loops look like permanent
+# bottom-of-pipeline stages.
 _PIPELINE_STAGES = [
     "dataset-policy-spec",
     "exploratory-data-analysis",
     "generate-eda-hypotheses",
     "column-transform-spec",
     "generate-preprocessing-code",
-    "repair-preprocessing-code",
-    "preprocess",
+    "inspect-preprocessing-code",
+    "execute-generated-preprocessing",
+    "validate-preprocessing-output",
+    "review-preprocessing-quality",
     "generate-feature-engineering-code",
-    "repair-feature-engineering-code",
-    "feature-engineering",
+    "inspect-feature-engineering-code",
+    "execute-feature-engineering",
+    "validate-feature-engineering",
     "train-models",
     "evaluate-models",
     "training-diagnostics",
     "select-model",
     "global-xai",
     "local-xai",
+    "shortcut-feature-audit",
+    "interpret-global-xai",
+    "interpret-local-xai",
     "package-analysis-bundle",
     "run-inference",
     "explain-risk",
-    "recommend-action",
 ]
+_PIPELINE_STAGE_INDEX = {stage: idx for idx, stage in enumerate(_PIPELINE_STAGES)}
+_CONDITIONAL_NEXT_STAGE = {
+    "repair-preprocessing-code": "inspect-preprocessing-code",
+    "repair-feature-engineering-code": "inspect-feature-engineering-code",
+    "review-preprocessing-quality": "repair-preprocessing-code",
+    "validate-feature-engineering": "repair-feature-engineering-code",
+    "inspect-preprocessing-code": "repair-preprocessing-code",
+    "inspect-feature-engineering-code": "repair-feature-engineering-code",
+}
+_TERMINAL_LIFECYCLE_EVENTS = {"run_failed", "run_complete", "cache_saved"}
+_VISIBLE_LIFECYCLE_EVENTS = {"run_complete", "run_failed", "cache_saved"}
 
 # Colour palette per status
 _NODE_COLORS = {
@@ -53,6 +74,54 @@ _NODE_COLORS = {
 # LLM call line: detect the header and the prediction bullets
 _LLM_CALL_RE = re.compile(r"LLM call \[([^\]]+)\]")
 _PREDICTION_TAG_RE = re.compile(r"(\[(tested|supported|exploratory)\])")
+
+# Bold the first "label:" on a line.  Two cases:
+#   1. Special no-colon keywords: "validation FAILED", "validation passed"
+#   2. Generic "word(s):" pattern — catches feature_frame:, policy spec keys:,
+#      Customer_ID:, verdict:, role violation:, interactions_rationale:, etc.
+_BOLD_LEAD_RE = re.compile(
+    r"^(⚠\s+)?("
+    r"validation FAILED|validation passed"  # no-colon keywords
+    r"|[\w][\w _]{0,45}:"                  # generic label: (word chars, spaces, underscores)
+    r")",
+    re.IGNORECASE,
+)
+
+# Bold [content] bracket references selectively
+_BRACKET_CONTENT_RE = re.compile(r"\[([^\]]+)\]")
+_TIER_TAGS = frozenset({"tested", "supported", "exploratory"})
+_IDENT_RE = re.compile(r"^[\w][\w\s_-]{0,39}$")
+
+
+def _apply_inline_bold(line: str) -> str:
+    """Bold diagnostic keywords and column/field references in a summary line."""
+    m = _BOLD_LEAD_RE.match(line)
+    if m:
+        warn = m.group(1) or ""
+        keyword = m.group(2)
+        rest = line[m.end():]
+        line = f"{warn}**{keyword}**{rest}"
+
+    def _bold_bracket(bm: re.Match) -> str:
+        content = bm.group(1)
+        if content.lower() in _TIER_TAGS:
+            return bm.group(0)  # tier tags handled as bullet prefixes
+        if "'" in content:
+            return bm.group(0)  # Python list repr like ['col1', 'col2'] — skip
+        if "," in content and "/" not in content:
+            return bm.group(0)  # comma-separated column list — skip
+        if "/" in content:
+            return f"**[{content}]**"  # severity tag like [critical/target_alignment]
+        if _IDENT_RE.match(content):
+            return f"**[{content}]**"  # identifier-like column/field ref like [Age]
+        return bm.group(0)
+
+    return _BRACKET_CONTENT_RE.sub(_bold_bracket, line)
+
+# Full LLM call line in raw log files — used to enrich JSONL trace cards
+_LOG_LLM_CALL_RE = re.compile(
+    r"LLM call \[([^\]]+)\]\s+model=(\S+)\s+input_tokens=(\d+)\s+output_tokens=(\d+)\s+duration=(\S+)"
+)
 
 
 def parse_stage_log(path: "str | Path") -> dict:
@@ -110,6 +179,41 @@ def parse_stage_log(path: "str | Path") -> dict:
             run_summary["total_tokens"] = int(m.group(1))
             continue
 
+        m = _RUN_STAGE_START_RE.search(line)
+        if m:
+            run_summary["stage"] = m.group(1)
+            cards.append(
+                _structured_event_to_card(
+                    {
+                        "event_type": "run_start",
+                        "node": "__run__",
+                        "status": "pass",
+                        "stage": m.group(1),
+                    }
+                )
+            )
+            continue
+
+        m = _RUN_STAGE_COMPLETE_RE.search(line)
+        if m:
+            if current_card is not None:
+                _finalise_card(current_card)
+                cards.append(current_card)
+                current_card = None
+            run_summary["stage"] = run_summary.get("stage") or m.group(1)
+            cards.append(
+                _structured_event_to_card(
+                    {
+                        "event_type": "run_complete",
+                        "node": "__run__",
+                        "status": "pass",
+                        "stage": m.group(1),
+                        "metrics": {"duration": m.group(2).strip()},
+                    }
+                )
+            )
+            continue
+
         # Check for new node start
         m = _NODE_START_RE.search(line)
         if m:
@@ -160,6 +264,45 @@ def parse_trace_artifact(path: "str | Path") -> dict:
     return parse_stage_log(path)
 
 
+def parse_live_trace_artifacts(log_path: "str | Path", trace_path: "str | Path | None") -> dict:
+    """Parse a live raw log and overlay JSONL completion status when available.
+
+    Raw stage logs are freshest during long-running nodes, but they only contain
+    node-start markers. Structured JSONL is less verbose, but records true
+    node-complete events. Combining them keeps the log content live while
+    preventing the pipeline rail from showing an already-completed last raw node
+    as still running.
+    """
+    raw_trace = parse_stage_log(log_path)
+    if not trace_path:
+        return raw_trace
+
+    structured_trace = parse_structured_trace_jsonl(trace_path)
+    completion_by_occurrence: dict[tuple[str, int], str] = {}
+    structured_counts: dict[str, int] = {}
+    for card in structured_trace.get("cards", []):
+        name = str(card.get("node_name") or "")
+        if not name or name.startswith("__") or name in _VISIBLE_LIFECYCLE_EVENTS:
+            continue
+        structured_counts[name] = structured_counts.get(name, 0) + 1
+        completion_by_occurrence[(name, structured_counts[name])] = str(card.get("status") or "pass")
+
+    raw_counts: dict[str, int] = {}
+    for card in raw_trace.get("cards", []):
+        name = str(card.get("node_name") or "")
+        if not name or name.startswith("__") or name in _VISIBLE_LIFECYCLE_EVENTS:
+            continue
+        raw_counts[name] = raw_counts.get(name, 0) + 1
+        status = completion_by_occurrence.get((name, raw_counts[name]))
+        if status:
+            card["status"] = status
+            card["completed_by_trace"] = True
+
+    summary = raw_trace.setdefault("run_summary", {})
+    summary["live_completion_overlay"] = str(trace_path)
+    return raw_trace
+
+
 def parse_structured_trace_jsonl(path: "str | Path") -> dict:
     """Parse a structured trace JSONL file into the same card shape as logs."""
     path = Path(path)
@@ -197,6 +340,7 @@ def parse_structured_trace_jsonl(path: "str | Path") -> dict:
 
     run_summary["total_events"] = len(events)
 
+    companion_log_path: str | None = None
     for event in events:
         event_type = str(event.get("event_type") or "")
         if event.get("run_id") and not run_summary.get("run_id"):
@@ -207,8 +351,51 @@ def parse_structured_trace_jsonl(path: "str | Path") -> dict:
         if event_type == "run_start":
             run_summary["run_id"] = event.get("run_id", run_summary.get("run_id"))
             run_summary["stage"] = event.get("stage", run_summary.get("stage"))
+            companion_log_path = (event.get("artifacts") or {}).get("log_path")
         if event_type in {"run_start", "run_complete", "run_failed", "cache_saved"} or event.get("node"):
             cards.append(_structured_event_to_card(event))
+
+    # Enrich JSONL cards with content from the companion raw log.
+    # JSONL node events have metrics:{} — all rich detail lives in the .log file.
+    if companion_log_path:
+        llm_calls = _parse_llm_calls_from_log(companion_log_path)
+        node_content = _parse_node_content_from_log(companion_log_path)
+        # Track occurrences to match the nth card to the nth LLM call for
+        # nodes that run multiple times (e.g. repeated repair attempts).
+        node_occurrences: dict[str, int] = {}
+        total_input = total_output = 0
+        for card in cards:
+            node = card["node_name"]
+            if node.startswith("__") or node in _VISIBLE_LIFECYCLE_EVENTS:
+                continue
+            calls = llm_calls.get(node, [])
+            if calls:
+                # LLM node: prepend call header + post-call content (hypotheses, etc.)
+                idx = node_occurrences.get(node, 0)
+                node_occurrences[node] = idx + 1
+                call = calls[min(idx, len(calls) - 1)]
+                meta = (f"model={call['model']} | input_tokens={call['input_tokens']} | "
+                        f"output_tokens={call['output_tokens']} | duration={call['duration']}")
+                llm_line = f"LLM call [{node}] {meta}"
+                inject = [llm_line] + call.get("content_lines", [])
+                for pos, l in enumerate(inject):
+                    card["summary_lines"].insert(pos, l)
+                total_input += int(call["input_tokens"])
+                total_output += int(call["output_tokens"])
+            else:
+                # Non-LLM node (e.g. validate-preprocessing-output): prepend
+                # general log content so violations and check results are visible.
+                general = node_content.get(node, [])
+                if general:
+                    occ = node_occurrences.get(node, 0)
+                    node_occurrences[node] = occ + 1
+                    # Each run of a repeated node gets its own slice of content
+                    # (content lines are not split per-occurrence, so we just
+                    # show the full set for every card — repetition is harmless).
+                    for pos, l in enumerate(general):
+                        card["summary_lines"].insert(pos, l)
+        if total_input or total_output:
+            run_summary["total_tokens"] = total_input + total_output
 
     return {"run_summary": run_summary, "cards": cards}
 
@@ -234,13 +421,19 @@ def _structured_event_to_card(event: dict[str, Any]) -> dict:
     - Complex objects (DataFrames, models, lists) have no scalar metrics and
       are labeled "(complex object)".
     """
-    node_name = str(event.get("node") or event.get("event_type") or "event")
+    event_type = str(event.get("event_type") or "")
+    raw_node = str(event.get("node") or "")
+    if raw_node == "__run__" and event_type:
+        node_name = event_type
+    else:
+        node_name = str(event.get("node") or event_type or "event")
     status = _normalize_status(str(event.get("status") or ""))
     summary_lines: list[str] = []
     warning_lines: list[str] = []
 
-    event_type = event.get("event_type")
     if event_type:
+        if event_type in {"run_start", "run_complete", "run_failed", "cache_saved"}:
+            summary_lines.append(f"Lifecycle event: {event_type}")
         summary_lines.append(f"**Event type:** {event_type}")
 
     # ── State keys ────────────────────────────────────────────────────────────
@@ -293,6 +486,8 @@ def _structured_event_to_card(event: dict[str, Any]) -> dict:
 
     warnings = event.get("warnings") or []
     warning_lines.extend(_stringify_collection(warnings))
+    if event.get("error"):
+        warning_lines.append(str(event.get("error")))
 
     raw_lines = [json.dumps(event, sort_keys=True, default=str)]
     return {
@@ -353,12 +548,16 @@ def _extract_level(line: str) -> str | None:
 
 
 def _extract_message(line: str) -> str:
-    """Extract the message portion from a log line (everything after the logger name)."""
-    # Log format: "HH:MM:SS LEVEL logger_name  message"
-    # We split on two or more spaces following the logger name part
-    parts = re.split(r"\s{2,}", line.strip(), maxsplit=3)
-    if len(parts) >= 4:
-        return parts[3].strip()
+    """Extract the message portion from a log line (everything after the logger name).
+
+    Log format: "HH:MM:SS LEVEL  logger_name  message"
+    Two splits (maxsplit=2) gives [timestamp+level, logger_name, message].
+    maxsplit=3 would over-split messages that contain internal whitespace padding
+    (e.g. "col ID                        action=drop" → "col ID" + "action=drop").
+    """
+    parts = re.split(r"\s{2,}", line.strip(), maxsplit=2)
+    if len(parts) >= 3:
+        return parts[2].strip()
     if len(parts) >= 1:
         return parts[-1].strip()
     return line.strip()
@@ -419,7 +618,8 @@ def _format_llm_call_line(line: str) -> str:
     node = m.group(1)
     meta = line[m.end():].strip()
     # Make metadata tokens easier to scan by separating with ·
-    meta = re.sub(r"\s+", " · ", meta, count=6)
+    if "|" not in meta:
+        meta = re.sub(r"\s+", "  |  ", meta, count=6)
     return f"**LLM call** `{node}`  \n{meta}"
 
 
@@ -441,6 +641,7 @@ def _render_summary_lines(summary_lines: list[str]) -> str:
     blocks: list[str] = []      # paragraph-level blocks
     plain_buffer: list[str] = []  # consecutive plain lines to merge
     bullet_buffer: list[str] = []  # consecutive bullet lines to merge
+    llm_call_count = 0
 
     def flush_plain():
         if plain_buffer:
@@ -459,7 +660,11 @@ def _render_summary_lines(summary_lines: list[str]) -> str:
 
         if _LLM_CALL_RE.search(sl):
             flush_plain(); flush_bullets()
-            blocks.append(_format_llm_call_line(sl))
+            llm_call_count += 1
+            formatted = _format_llm_call_line(sl)
+            if llm_call_count > 1:
+                formatted = formatted.replace("**LLM call**", "**LLM call** _(retry)_", 1)
+            blocks.append(formatted)
 
         elif sl.startswith("**") and sl.endswith("**") and len(sl) > 4:
             # Pre-formatted bold header (e.g. from structured event cards)
@@ -482,11 +687,16 @@ def _render_summary_lines(summary_lines: list[str]) -> str:
 
         elif any(sl.startswith(tag) for tag in _BULLET_TAGS):
             flush_plain()
+            # Bold the tier tag prefix while keeping the rest of the line
+            for tag in _BULLET_TAGS:
+                if sl.startswith(tag):
+                    sl = f"**{tag}**" + sl[len(tag):]
+                    break
             bullet_buffer.append(f"- {sl}")
 
         else:
             flush_bullets()
-            plain_buffer.append(sl)
+            plain_buffer.append(_apply_inline_bold(sl))
 
     flush_plain()
     flush_bullets()
@@ -496,58 +706,43 @@ def _render_summary_lines(summary_lines: list[str]) -> str:
 def build_pipeline_html(trace: dict) -> str:
     """Build an HTML node-edge pipeline diagram from a trace dict.
 
-    Completed nodes are coloured by status. The last completed node is
-    marked as "running" (blue) if the run is still live. Nodes not yet
-    seen are shown as grey pending boxes.
+    Actual trace events are rendered in execution order. This keeps conditional
+    repair loops beside the stage that triggered them instead of appending
+    unknown retry nodes at the bottom of the diagram. Pending nodes are limited
+    to the remaining main-path stages.
     """
     cards = trace.get("cards", [])
-
-    # Map node_name → status for nodes seen in the trace
-    seen: dict[str, str] = {}
-    for card in cards:
-        name = card["node_name"]
-        status = card["status"]
-        # Keep worst status if node appears multiple times (e.g. repair loops)
-        priority = {"error": 4, "warn": 3, "repair": 2, "pass": 1, "pending": 0, "running": 0}
-        if name not in seen or priority.get(status, 0) > priority.get(seen[name], 0):
-            seen[name] = status
-
-    # Build full ordered stage list — canonical stages first, then any extra nodes from log
-    canonical = list(_PIPELINE_STAGES)
-    extras = [c["node_name"] for c in cards if c["node_name"] not in canonical
-              and not c["node_name"].startswith("__")]
-    all_stages = canonical + [e for e in extras if e not in canonical]
-
-    # Determine "running" node: last seen node that completed (blue highlight)
-    completed_in_order = [s for s in all_stages if s in seen]
-    if completed_in_order:
-        last_completed = completed_in_order[-1]
-        # Only mark as running if it passed (error/warn are terminal colours)
-        if seen.get(last_completed) == "pass":
-            seen[last_completed] = "running"
+    items = _build_pipeline_items(cards)
 
     boxes: list[str] = []
-    for stage in all_stages:
-        status = seen.get(stage, "pending")
+    for item in items:
+        stage = item["node_name"]
+        status = item["status"]
         bg, fg = _NODE_COLORS.get(status, _NODE_COLORS["pending"])
         icon = {"pass": "✅", "warn": "⚠️", "error": "❌", "repair": "🔧",
                 "running": "⟳", "pending": "○"}.get(status, "•")
-        label = stage.replace("-", "‑")  # non-breaking hyphen so long names don't wrap badly
+        attempt = item.get("attempt")
+        suffix = f" #{attempt}" if isinstance(attempt, int) and attempt > 1 else ""
+        label = f"{stage}{suffix}".replace("_", "-").replace("-", "‑")  # non-breaking hyphen for compact labels
+        safe_label = html.escape(label)
+        safe_title = html.escape(stage)
 
         pulse = ""
         if status == "running":
             pulse = " class=\"pulsing\""
 
         boxes.append(
-            f'<div{pulse} style="'
+            f'<div{pulse} title="{safe_title}" style="'
             f'background:{bg};color:{fg};'
-            f'border-radius:6px;padding:5px 8px;margin:2px 0;'
-            f'font-size:11px;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
-            f'max-width:180px;'
-            f'">{icon} {label}</div>'
+            f'border-radius:9px;padding:10px 12px;margin:4px 0;'
+            f'min-height:30px;display:flex;align-items:center;gap:7px;'
+            f'font-size:12px;line-height:1.25;font-family:monospace;font-weight:650;'
+            f'white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'
+            f'max-width:240px;box-sizing:border-box;'
+            f'">{icon} <span style="overflow:hidden;text-overflow:ellipsis;">{safe_label}</span></div>'
         )
         boxes.append(
-            '<div style="text-align:center;color:#bdc3c7;font-size:10px;line-height:1.2;">│</div>'
+            '<div style="text-align:center;color:#bdc3c7;font-size:16px;line-height:24px;height:24px;">│</div>'
         )
 
     # Remove trailing connector
@@ -566,20 +761,187 @@ def build_pipeline_html(trace: dict) -> str:
     return css + '<div style="padding:8px 4px;">' + "\n".join(boxes) + "</div>"
 
 
-def list_available_logs(log_dir: "str | Path") -> list[str]:
-    """Return log file names available for historical inspection, newest first.
+def _build_pipeline_items(cards: list[dict]) -> list[dict]:
+    """Return sidebar items in real execution order plus main-path pending nodes."""
+    items: list[dict] = []
+    occurrence_counts: dict[str, int] = {}
+    terminal_seen = False
+    last_main_idx = -1
+    last_actual: dict | None = None
 
-    Includes structured JSONL traces (preferred) and raw stage logs.
-    Filenames only — the caller resolves full paths.
+    for card in cards:
+        name = str(card.get("node_name") or "")
+        if name.startswith("__"):
+            continue
+
+        if name in _VISIBLE_LIFECYCLE_EVENTS:
+            terminal_seen = name in _TERMINAL_LIFECYCLE_EVENTS or terminal_seen
+        elif name in _PIPELINE_STAGE_INDEX:
+            last_main_idx = max(last_main_idx, _PIPELINE_STAGE_INDEX[name])
+
+        occurrence_counts[name] = occurrence_counts.get(name, 0) + 1
+        item = {
+            "node_name": name,
+            "status": card.get("status", "pending"),
+            "attempt": occurrence_counts[name],
+            "completed_by_trace": bool(card.get("completed_by_trace")),
+        }
+        items.append(item)
+        last_actual = item
+
+    if not terminal_seen:
+        if (
+            last_actual
+            and last_actual.get("status") == "pass"
+            and last_actual.get("node_name") != "run_start"
+            and not last_actual.get("completed_by_trace")
+        ):
+            last_actual["status"] = "running"
+        for pending_stage in _pending_stages_after(last_actual, last_main_idx):
+            items.append({"node_name": pending_stage, "status": "pending"})
+
+    if not items:
+        items = [{"node_name": stage, "status": "pending"} for stage in _PIPELINE_STAGES]
+
+    return items
+
+
+def _pending_stages_after(last_actual: dict | None, last_main_idx: int) -> list[str]:
+    """Compute pending main-path stages after the latest real event."""
+    if not last_actual:
+        return list(_PIPELINE_STAGES)
+
+    last_name = str(last_actual.get("node_name") or "")
+    last_status = str(last_actual.get("status") or "")
+
+    if last_name == "run_start":
+        return list(_PIPELINE_STAGES)
+
+    if last_status == "error" and last_name in _CONDITIONAL_NEXT_STAGE:
+        return [_CONDITIONAL_NEXT_STAGE[last_name]]
+
+    if last_name in {"repair-preprocessing-code", "repair-feature-engineering-code"}:
+        return [_CONDITIONAL_NEXT_STAGE[last_name]]
+
+    if last_main_idx < 0:
+        return []
+
+    return _PIPELINE_STAGES[last_main_idx + 1:]
+
+
+def _parse_node_content_from_log(log_path: "str | Path") -> dict[str, list[str]]:
+    """Extract all logged content lines per node from a companion raw stage log.
+
+    Unlike _parse_llm_calls_from_log (which is scoped to LLM call output),
+    this captures every log line for every node — including WARNING lines for
+    validation failures, role violations, invariant checks, etc.  Used to
+    enrich JSONL cards for nodes that make no LLM call (e.g. validate-preprocessing-output).
+
+    Returns {node_name: [message_line, ...]}, capped at 30 lines per node.
+    """
+    path = Path(log_path)
+    if not path.is_file():
+        return {}
+    result: dict[str, list[str]] = {}
+    current_node: str | None = None
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = _NODE_START_RE.search(line)
+            if m:
+                current_node = m.group(1)
+                continue
+            if current_node is None:
+                continue
+            bucket = result.setdefault(current_node, [])
+            if len(bucket) >= 30:
+                continue
+            level = _extract_level(line)
+            msg = _extract_message(line)
+            if not msg:
+                continue
+            # Prefix WARNING/ERROR lines so the renderer can highlight them
+            if level in ("ERROR", "WARNING"):
+                bucket.append(f"⚠ {msg}")
+            else:
+                bucket.append(msg)
+    except OSError:
+        pass
+    return result
+
+
+def _parse_llm_calls_from_log(log_path: "str | Path") -> dict[str, list[dict]]:
+    """Extract per-node LLM call metadata AND content lines from a companion raw log.
+
+    For each LLM call, captures:
+      - model, input_tokens, output_tokens, duration
+      - content_lines: all log message lines that follow the LLM call line until
+        the next node start (>>>) or next LLM call — includes hypothesis bullets,
+        section counts, and any other structured output the node logged.
+
+    Returns {node_name: [{model, ..., content_lines: [str, ...]}, ...]}.
+    Multiple calls per node (e.g. escalated repairs) are preserved in order.
+    """
+    path = Path(log_path)
+    if not path.is_file():
+        return {}
+    result: dict[str, list[dict]] = {}
+    current_call_node: str | None = None
+    current_call_entry: dict | None = None
+
+    try:
+        for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+            # New node start resets content collection
+            if _NODE_START_RE.search(line):
+                current_call_node = None
+                current_call_entry = None
+                continue
+
+            m = _LOG_LLM_CALL_RE.search(line)
+            if m:
+                node = m.group(1)
+                entry: dict = {
+                    "model": m.group(2),
+                    "input_tokens": m.group(3),
+                    "output_tokens": m.group(4),
+                    "duration": m.group(5),
+                    "content_lines": [],
+                }
+                result.setdefault(node, []).append(entry)
+                current_call_node = node
+                current_call_entry = entry
+                continue
+
+            # Collect content lines that follow the LLM call (hypothesis bullets, etc.)
+            if current_call_entry is not None and len(current_call_entry["content_lines"]) < 40:
+                msg = _extract_message(line)
+                if msg:
+                    current_call_entry["content_lines"].append(msg)
+    except OSError:
+        pass
+    return result
+
+
+def list_available_logs(log_dir: "str | Path") -> list[str]:
+    """Return one preferred artifact per run for historical inspection.
+
+    When both a structured JSONL trace and a raw stage log exist for the same
+    run, prefer the JSONL trace. The returned list is ordered by actual file
+    recency across artifact types so recent raw logs are not buried under older
+    JSONLs.
     """
     log_dir = Path(log_dir)
     if not log_dir.is_dir():
         return []
-    jsonls = sorted(log_dir.glob("trace_events_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-    logs = sorted(log_dir.glob("stage_full_*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-    # JSONL first (richer), then raw logs; cap at 30 total
-    all_files = list(jsonls) + [l for l in logs if l.stem not in {j.stem.replace("trace_events_", "stage_full_") for j in jsonls}]
-    return [p.name for p in all_files[:30]]
+    jsonls = list(log_dir.glob("trace_events_*.jsonl"))
+    logs = list(log_dir.glob("stage_full_*.log"))
+
+    traced_run_ids = {p.stem.replace("trace_events_", "", 1) for p in jsonls}
+    preferred = list(jsonls) + [
+        log for log in logs
+        if log.stem.replace("stage_full_", "", 1) not in traced_run_ids
+    ]
+    preferred.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return [p.name for p in preferred[:100]]
 
 
 def build_trace_markdown(trace: dict) -> str:
@@ -638,9 +1000,40 @@ def build_trace_markdown(trace: dict) -> str:
             card_blocks.append("\n".join(warn_lines))
 
         if card["summary_lines"]:
-            rendered = _render_summary_lines(card["summary_lines"][:10])
-            if rendered:
-                card_blocks.append(rendered)
+            # Injected log lines (LLM call header + hypothesis bullets, or validation
+            # log lines) are prepended at the front.  Structured event metadata
+            # (Event type, State keys written) follows.  Split them so structured
+            # metadata always shows in full while injected content is capped.
+            _VERBOSE_NODES = {"exploratory-data-analysis", "generate-eda-hypotheses"}
+            injected: list[str] = []
+            structured: list[str] = []
+            in_structured = False
+            for sl in card["summary_lines"]:
+                if not in_structured and (
+                    sl.startswith("Lifecycle event:")
+                    or sl.startswith("**Event type:")
+                    or sl.startswith("**State keys")
+                    or sl.startswith("**Metrics:")
+                    or sl.startswith("**Artifacts:")
+                ):
+                    in_structured = True
+                (structured if in_structured else injected).append(sl)
+
+            parts: list[str] = []
+            if injected:
+                cap = 10 if card["node_name"] in _VERBOSE_NODES else 6
+                rendered_inj = _render_summary_lines(injected[:cap])
+                if rendered_inj:
+                    extra = len(injected) - cap
+                    if extra > 0:
+                        rendered_inj += f"\n\n_+{extra} more_"
+                    parts.append(rendered_inj)
+            if structured:
+                rendered_str = _render_summary_lines(structured)
+                if rendered_str:
+                    parts.append(rendered_str)
+            if parts:
+                card_blocks.append("\n\n".join(parts))
 
         card_sections.append("\n\n".join(card_blocks))
 

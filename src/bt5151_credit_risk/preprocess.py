@@ -866,6 +866,256 @@ def validate_semantic_invariants(
     return violations
 
 
+def _spec_transforms(column_transform_spec: dict | None) -> dict:
+    raw_spec = column_transform_spec or {}
+    return raw_spec.get("transforms") or raw_spec.get("columns") or {}
+
+
+def _infer_group_column(column_transform_spec: dict | None, raw_frame: pd.DataFrame) -> str | None:
+    transforms = _spec_transforms(column_transform_spec)
+    for col, spec in transforms.items():
+        if isinstance(spec, dict) and spec.get("semantic_role") == "group_identifier" and col in raw_frame.columns:
+            return col
+    if "Customer_ID" in raw_frame.columns:
+        return "Customer_ID"
+    return None
+
+
+def _coerce_numeric(series: pd.Series) -> pd.Series:
+    return pd.to_numeric(series, errors="coerce").astype("float64")
+
+
+def _parse_age_series(series: pd.Series) -> pd.Series:
+    extracted = series.astype("string").str.extract(r"(-?\d+(?:\.\d+)?)")[0]
+    return _coerce_numeric(extracted)
+
+
+def _normalized_missing_string_mask(series: pd.Series) -> pd.Series:
+    as_string = series.astype("string")
+    normalized = as_string.str.strip().str.lower()
+    return as_string.isna() | normalized.isin({"", "nan", "none", "null", "not specified", "not_specified"})
+
+
+def _parse_credit_history_age_series(series: pd.Series) -> pd.Series:
+    as_string = series.astype("string")
+    extracted = as_string.str.extract(
+        r"(?i)^\s*(?P<years>\d+)\s*years?(?:\s*(?:and|&)?\s*(?P<months>\d+)\s*months?)?\s*$"
+    )
+    years = pd.to_numeric(extracted["years"], errors="coerce")
+    months = pd.to_numeric(extracted["months"], errors="coerce").fillna(0)
+    parsed = years * 12 + months
+    numeric_fallback = pd.to_numeric(as_string, errors="coerce")
+    return _coerce_numeric(parsed.where(parsed.notna(), numeric_fallback))
+
+
+def _fill_by_group_then_global(
+    values: pd.Series,
+    groups: pd.Series | None,
+    default: float,
+) -> pd.Series:
+    filled = _coerce_numeric(values)
+    if groups is not None:
+        grouped_median = filled.groupby(groups).transform("median").astype("float64")
+        filled = filled.fillna(grouped_median)
+    if filled.notna().any():
+        global_fill = float(filled.median())
+    else:
+        global_fill = float(default)
+    return filled.fillna(global_fill)
+
+
+def _cap_credit_history_by_adulthood(months: pd.Series, age_series: pd.Series | None) -> pd.Series:
+    if age_series is None:
+        return months
+    age_numeric = _coerce_numeric(age_series)
+    adulthood_cap = np.floor((age_numeric - 18).clip(lower=0) * 12 * 1.1)
+    capped = months.copy()
+    mask = capped.notna() & adulthood_cap.notna()
+    capped.loc[mask] = np.minimum(capped.loc[mask], adulthood_cap.loc[mask])
+    return capped
+
+
+def normalize_preprocessing_artifacts(
+    execution_result: dict,
+    column_transform_spec: dict,
+) -> dict:
+    artifacts = execution_result.get("artifacts", {})
+    workspace_path = Path(execution_result.get("workspace_path", ""))
+    raw_frame_path = Path(execution_result.get("raw_frame_path", workspace_path / "raw_frame.csv"))
+    feature_frame_path = Path(artifacts.get("feature_frame.csv", ""))
+    cleaned_frame_path = Path(artifacts.get("cleaned_frame.csv", ""))
+
+    report = {
+        "applied": False,
+        "normalized_columns": [],
+        "actions": [],
+        "skipped": [],
+    }
+
+    if not raw_frame_path.is_file():
+        report["skipped"].append("raw_frame_missing")
+        return report
+    if not feature_frame_path.is_file():
+        report["skipped"].append("feature_frame_missing")
+        return report
+
+    try:
+        raw_frame = pd.read_csv(raw_frame_path, low_memory=False)
+        feature_frame = pd.read_csv(feature_frame_path, low_memory=False)
+    except Exception as exc:  # pragma: no cover - defensive artifact guard
+        report["skipped"].append(f"artifact_read_error:{type(exc).__name__}")
+        return report
+
+    cleaned_frame = None
+    if cleaned_frame_path.is_file():
+        try:
+            cleaned_frame = pd.read_csv(cleaned_frame_path, low_memory=False)
+        except Exception as exc:  # pragma: no cover - defensive artifact guard
+            report["skipped"].append(f"cleaned_frame_read_error:{type(exc).__name__}")
+
+    if len(raw_frame) != len(feature_frame):
+        report["skipped"].append(
+            f"row_count_mismatch:raw={len(raw_frame)} feature={len(feature_frame)}"
+        )
+        return report
+    if cleaned_frame is not None and len(cleaned_frame) != len(raw_frame):
+        report["skipped"].append(
+            f"cleaned_row_count_mismatch:raw={len(raw_frame)} cleaned={len(cleaned_frame)}"
+        )
+        cleaned_frame = None
+
+    transforms = _spec_transforms(column_transform_spec)
+    group_column = _infer_group_column(column_transform_spec, raw_frame)
+    changed_feature = False
+    changed_cleaned = False
+    normalized_age = None
+
+    if "Age" in transforms and "Age" in raw_frame.columns and "Age" in feature_frame.columns:
+        age_spec = transforms.get("Age") or {}
+        parsed_age = _parse_age_series(raw_frame["Age"])
+        parsed_age = parsed_age.where(parsed_age.between(18, 100))
+        group_values = raw_frame[group_column] if group_column and group_column in raw_frame.columns else None
+        normalized_age = _fill_by_group_then_global(parsed_age, group_values, default=30.0).clip(18, 100)
+
+        feature_frame["Age"] = normalized_age.astype(float)
+        changed_feature = True
+        if cleaned_frame is not None and "Age" in cleaned_frame.columns:
+            cleaned_frame["Age"] = normalized_age.astype(float)
+            changed_cleaned = True
+        report["normalized_columns"].append("Age")
+        report["actions"].append(
+            {
+                "column": "Age",
+                "action": "reparsed_from_raw_and_clipped_to_human_range",
+                "group_column": group_column,
+                "valid_range": [18, 100],
+                "source_cleaning": age_spec.get("cleaning"),
+            }
+        )
+
+    if "Credit_History_Age" in transforms and "Credit_History_Age" in raw_frame.columns and "Credit_History_Age" in feature_frame.columns:
+        cha_spec = transforms.get("Credit_History_Age") or {}
+        age_source = normalized_age
+        if age_source is None and "Age" in feature_frame.columns:
+            age_source = feature_frame["Age"]
+        elif cleaned_frame is not None and "Age" in cleaned_frame.columns:
+            age_source = cleaned_frame["Age"]
+        elif "Age" in raw_frame.columns:
+            age_source = raw_frame["Age"]
+
+        parsed_months = _parse_credit_history_age_series(raw_frame["Credit_History_Age"])
+        parsed_months = parsed_months.where(parsed_months >= 0)
+        parsed_months = parsed_months.where(parsed_months <= 1000)
+        parsed_months = _cap_credit_history_by_adulthood(parsed_months, age_source)
+
+        group_values = raw_frame[group_column] if group_column and group_column in raw_frame.columns else None
+        default_months = np.nan
+        if age_source is not None:
+            age_cap = _cap_credit_history_by_adulthood(pd.Series([0.0] * len(raw_frame)), age_source)
+            if age_cap.notna().any():
+                default_months = float(age_cap.median())
+        if np.isnan(default_months):
+            default_months = 0.0
+        parsed_months = _fill_by_group_then_global(parsed_months, group_values, default=default_months)
+        parsed_months = _cap_credit_history_by_adulthood(parsed_months, age_source).round(0)
+
+        feature_frame["Credit_History_Age"] = parsed_months.astype(float)
+        changed_feature = True
+        if cleaned_frame is not None and "Credit_History_Age" in cleaned_frame.columns:
+            cleaned_frame["Credit_History_Age"] = parsed_months.astype(float)
+            changed_cleaned = True
+        report["normalized_columns"].append("Credit_History_Age")
+        report["actions"].append(
+            {
+                "column": "Credit_History_Age",
+                "action": "reparsed_from_raw_and_capped_by_adulthood",
+                "group_column": group_column,
+                "upper_bound_months": 1000,
+                "source_cleaning": cha_spec.get("cleaning"),
+            }
+        )
+
+    for col, spec in transforms.items():
+        if not isinstance(spec, dict) or spec.get("semantic_role") != "multi_value_set":
+            continue
+        if col not in raw_frame.columns:
+            continue
+
+        prefix = f"{col}_"
+        missing_col = f"{col}_missing"
+        sibling_cols = [c for c in feature_frame.columns if c.startswith(prefix) and c != missing_col]
+        cleaning_text = str(spec.get("cleaning") or "").lower()
+        should_manage_missing = bool(sibling_cols) or missing_col in feature_frame.columns or "missing" in cleaning_text
+        if not should_manage_missing:
+            continue
+
+        missing_mask = _normalized_missing_string_mask(raw_frame[col]).astype(int)
+        feature_frame[missing_col] = missing_mask
+        changed_feature = True
+
+        dropped_cols: list[str] = []
+        for sibling in list(sibling_cols):
+            suffix = sibling[len(prefix):].replace("_", " ").strip().lower()
+            if suffix in {"not specified", "nan", "none", "null"}:
+                feature_frame = feature_frame.drop(columns=[sibling])
+                dropped_cols.append(sibling)
+                changed_feature = True
+
+        remaining_siblings = [
+            c for c in feature_frame.columns if c.startswith(prefix) and c != missing_col
+        ]
+        for sibling in remaining_siblings:
+            # Convert to plain Python object dtype first so that pandas nullable
+            # integer (Int64) or float (Float64) types don't raise a TypeError
+            # in fillna() when the fill value can't be safely cast.
+            raw_col = feature_frame[sibling].astype(object)
+            coerced = pd.to_numeric(raw_col, errors="coerce").fillna(0.0)
+            feature_frame[sibling] = (coerced != 0).astype("int64")
+            feature_frame.loc[missing_mask.astype(bool), sibling] = 0
+
+        report["normalized_columns"].append(col)
+        report["actions"].append(
+            {
+                "column": col,
+                "action": "normalized_missing_sentinel_and_zeroed_siblings",
+                "dropped_columns": dropped_cols,
+                "sibling_count": len(remaining_siblings),
+                "missing_rate": float(missing_mask.mean()),
+            }
+        )
+
+    if changed_feature:
+        feature_frame.to_csv(feature_frame_path, index=False)
+    if cleaned_frame is not None and changed_cleaned:
+        cleaned_frame.to_csv(cleaned_frame_path, index=False)
+
+    if report["normalized_columns"]:
+        report["applied"] = True
+        report["normalized_columns"] = sorted(set(report["normalized_columns"]))
+
+    return report
+
+
 # Check that generated artifacts are usable and do not violate split or leakage rules.
 def validate_preprocessing_output(
     execution_result: dict,
@@ -890,6 +1140,19 @@ def validate_preprocessing_output(
 
     checks: dict[str, bool] = {}
     errors: list[dict] = []
+    try:
+        deterministic_normalization = normalize_preprocessing_artifacts(
+            execution_result,
+            column_transform_spec,
+        )
+    except Exception as exc:
+        # Normalization is best-effort; a crash here must not kill the validation
+        # contract — the repair loop depends on validate returning a structured
+        # report, not raising an exception.
+        deterministic_normalization = {
+            "applied": False,
+            "skipped": [f"normalization_error:{type(exc).__name__}:{exc}"],
+        }
 
     def add_check(rule: str, passed: bool, message: str) -> None:
         checks[rule] = passed
@@ -1141,6 +1404,7 @@ def validate_preprocessing_output(
         contract_report = {
             "workspace": str(workspace_path),
             "passed": passed,
+            "deterministic_normalization": deterministic_normalization,
             "structural_checks": checks,
             "errors": errors,
             "warnings": warnings,
@@ -1162,6 +1426,7 @@ def validate_preprocessing_output(
         "warnings": warnings,
         "role_violations": role_violations,
         "cross_field_violations": invariant_violations,
+        "deterministic_normalization": deterministic_normalization,
     }
 
 

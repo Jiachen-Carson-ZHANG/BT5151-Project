@@ -19,6 +19,7 @@ Keys preserved:
 """
 
 import logging
+from datetime import date as _date
 from pathlib import Path
 
 import joblib
@@ -101,24 +102,46 @@ def save_cache(result: dict, metadata: dict | None = None, compress: int = 3) ->
     logger.info("    cache: saving %d fields (%d None)", len(present), len(missing))
     if missing:
         logger.debug("    cache: missing fields: %s", missing)
+    # Save as named file: pipeline_state_{run_id}_{YYYYMMDD}.pkl
+    run_id = payload.get("run_id") or "run"
+    saved_at = payload.get("cache_saved_at") or ""
+    date_tag = (saved_at[:10].replace("-", "")
+                if isinstance(saved_at, str) and len(saved_at) >= 10
+                else _date.today().strftime("%Y%m%d"))
+    named_file = CACHE_DIR / f"pipeline_state_{run_id}_{date_tag}.pkl"
+    joblib.dump(payload, named_file, compress=compress)
+    size_mb = named_file.stat().st_size / 1_048_576
+    logger.info("    cache saved → %s (%.1f MB)", named_file, size_mb)
+    # Also overwrite the default "latest" file for backward compatibility
     joblib.dump(payload, CACHE_FILE, compress=compress)
-    size_mb = CACHE_FILE.stat().st_size / 1_048_576
-    logger.info("    cache saved → %s (%.1f MB)", CACHE_FILE, size_mb)
-    return CACHE_FILE
+    return named_file
 
 
-def load_cache() -> "CreditRiskState | None":
-    """Load cached pipeline state from CACHE_FILE.
+def list_caches() -> list[Path]:
+    """Return all named cache files sorted by mtime (newest first)."""
+    if not CACHE_DIR.is_dir():
+        return []
+    files = sorted(
+        CACHE_DIR.glob("pipeline_state_*.pkl"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    return files
 
-    Returns a CreditRiskState instance, or None if the cache file does not exist.
+
+def load_cache(path: "str | Path | None" = None) -> "CreditRiskState | None":
+    """Load cached pipeline state from path, or CACHE_FILE if path is None.
+
+    Returns a CreditRiskState instance, or None if the file does not exist.
     """
     from bt5151_credit_risk.state import CreditRiskState
 
-    if not CACHE_FILE.is_file():
-        logger.warning("No pipeline cache found at %s. Run the pipeline with --save-cache first.", CACHE_FILE)
+    target = Path(path) if path else CACHE_FILE
+    if not target.is_file():
+        logger.warning("No pipeline cache found at %s. Run the pipeline with --save-cache first.", target)
         return None
-    logger.info("Loading pipeline cache from %s ...", CACHE_FILE)
-    payload = joblib.load(CACHE_FILE)
+    logger.info("Loading pipeline cache from %s ...", target)
+    payload = joblib.load(target)
     # raw_dataset_path is required by CreditRiskState but not meaningful at inference time.
     payload.setdefault("raw_dataset_path", "")
     state = CreditRiskState(**{k: v for k, v in payload.items() if k in CreditRiskState.model_fields})

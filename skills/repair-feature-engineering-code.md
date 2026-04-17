@@ -16,6 +16,31 @@ These are enforced by static analysis — repaired code that violates them will 
 1. **Never use `inplace=True`** on any pandas operation. The runtime uses pandas 3.x where Copy-on-Write is the only mode. Always reassign: `df = df.drop(...)`, `df['col'] = df['col'].fillna(...)`.
 2. **No forbidden imports** — subprocess, socket, os.system, eval, exec are blocked.
 
+## MANDATORY: Handle deferred categorical columns first
+
+If `deferred_categorical_columns` is present in the inputs, it is a dict mapping `{column_name: nunique_on_train}` for every column that preprocessing left as object-dtype and delegated to FE for encoding. **These columns MUST be encoded before any view is written.** If the validation error mentions `non-numeric/non-bool columns`, this is almost certainly the cause — fix it before touching anything else.
+
+Required encoding per view (apply train-only statistics to both frames):
+
+- **`nunique` ≤ 20** → one-hot in BOTH `linear_view` and `tree_view`. Drop the reference category (first dummy) to avoid perfect multicollinearity.
+- **`nunique` 21–50** → one-hot in `linear_view`; frequency encoding in `tree_view`.
+- **`nunique` > 50** → frequency encoding in both views. (Target encoding is allowed if you use out-of-fold means on train.)
+
+Frequency encoding pattern (compute on train, apply to test):
+```python
+freq_map = train_df[col].value_counts(normalize=True).to_dict()
+train_df[col] = train_df[col].map(freq_map).fillna(0.0)
+test_df[col] = test_df[col].map(freq_map).fillna(0.0)
+```
+
+After encoding, assert no object-dtype columns remain before writing each view's CSV:
+```python
+assert linear_train.select_dtypes(exclude=['number', 'bool']).empty, \
+    f"linear_view still has object columns: {list(linear_train.select_dtypes(exclude=['number', 'bool']).columns)}"
+```
+
+Every deferred column that is one-hot encoded must appear in `feature_lineage.json` with `operation: "one_hot"`.
+
 ## Reasoning steps
 
 Think through these steps before writing the repair:
@@ -71,7 +96,7 @@ The `hypothesis` field is **required**. Preserve the hypothesis from the origina
 - **Epsilon denominators are usually a bug, not a fix.** If a ratio is producing extreme spikes, replace `/(denominator + 1e-6)` with zero-aware branching and then clean up any resulting NaN using train-only statistics.
 - **Dual-view outputs must stay internally aligned.** If the code writes `linear_view` and `tree_view`, each view must have matching train/test columns within that view, and `view_metadata.json` must reference the correct artifact names.
 - **Deferred columns must be fully encoded in EVERY view, with the encoding tailored to that view's model family.** A deferred column (string dtype coming out of preprocessing) is not done after encoding it in one view — if the validation error says it is still a string in `tree_view` but numeric in `linear_view` (or vice versa), the encoding block was only written for one view. Fix both. The encoding strategy should be appropriate to the view: one-hot or standardized for `linear_view` (linear models need explicit dummy variables and scaled inputs); frequency or ordinal for `tree_view` (tree models can exploit compact numeric representations without needing explicit dummies). Never apply the same encoding blindly to both views — that defeats the purpose of the dual-view architecture.
-- **`feature_lineage.json` must still be written.** Every run produces a lineage manifest that the validator replays against the data. If the validation report flagged `lineage_replay_matches`, `ratios_use_raw_parents`, or `lineage_coverage_complete`, your repair must fix both the code AND the lineage entries so they agree. Ratio/product/sum/difference/interaction features must have `input_stage: pre_fe_raw_numeric` — compute them from the raw train/test frames passed to your function, not from log-transformed versions. Top-5 MI raw features can only appear in `dropped_features` with `drop_reason ∈ {leakage, deterministic_duplicate}`.
+- **`feature_lineage.json` must still be written, and `feature_engineering_report.json` formulas must be exact.** Every run produces a lineage manifest that the validator replays against the data. When an `added` or `transformed` report entry has a `formula`, the validator replays that exact arithmetic expression against the pre-FE train frame. If the code computes `Num_Credit_Inquiries / (Num_Credit_Card + 1)`, the report formula must include the `+ 1`; if the code computes `Outstanding_Debt * Interest_Rate / 100`, the formula must include `/ 100`. If the validation report flagged `lineage_replay_matches`, `ratios_use_raw_parents`, or `lineage_coverage_complete`, your repair must fix the code, the report formula, and the lineage entries so they agree. Ratio/product/sum/difference/interaction features must have `input_stage: pre_fe_raw_numeric` — compute them from the raw train/test frames passed to your function, not from log-transformed versions. Top-5 MI raw features can only appear in `dropped_features` with `drop_reason ∈ {leakage, deterministic_duplicate}`.
 
 ## Notes
 

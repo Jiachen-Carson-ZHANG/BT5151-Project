@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 logger = logging.getLogger(__name__)
 
 from bt5151_credit_risk.business import explain_risk
+from bt5151_credit_risk.config import FEATURE_ENGINEERING_MODE
 from bt5151_credit_risk.eda import build_eda_report
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics, reason_model_selection
 from bt5151_credit_risk.hypotheses import (
@@ -27,6 +28,7 @@ from bt5151_credit_risk.xai import (
     select_classification_cases,
 )
 from bt5151_credit_risk.feature_engineering import (
+    deterministic_feature_engineering_fallback_code,
     execute_feature_engineering,
     generate_feature_engineering_code,
     repair_feature_engineering_code,
@@ -304,18 +306,46 @@ def validate_preprocessing_output_node(state: CreditRiskState):
         "execution_log": state.preprocessing_execution_log or {},
         "raw_frame_path": state.preprocessing_raw_frame_path,
     }
-    validation_report = validate_preprocessing_output(
-        execution_result,
-        state.dataset_policy_spec,
-        state.column_transform_spec,
-    )
-    logger.info("    validation passed: %s, checks: %s", validation_report.get("passed"), validation_report.get("checks"))
-    if validation_report.get("errors"):
-        for err in validation_report["errors"]:
+    try:
+        validation_report = validate_preprocessing_output(
+            execution_result,
+            state.dataset_policy_spec,
+            state.column_transform_spec,
+        )
+    except Exception as exc:
+        # An unhandled exception here would bypass the repair routing and kill the
+        # pipeline.  Catch it, log it, and return a failed validation report so
+        # the repair loop triggers normally.
+        logger.warning(
+            "    validate-preprocessing-output raised an unexpected exception — "
+            "treating as validation failure so repair loop can run: %s: %s",
+            type(exc).__name__, exc,
+        )
+        validation_report = {
+            "passed": False,
+            "checks": {},
+            "errors": [{"rule": "validation_exception", "message": f"{type(exc).__name__}: {exc}"}],
+        }
+    passed = validation_report.get("passed")
+    errors = validation_report.get("errors") or []
+    warnings = validation_report.get("warnings") or []
+    if passed:
+        logger.info("    validation passed")
+    else:
+        failed_checks = [k for k, v in (validation_report.get("checks") or {}).items() if not v]
+        logger.warning("    validation FAILED — failed checks: %s", failed_checks)
+        for err in errors:
             logger.warning("    validation error: [%s] %s", err.get("rule"), err.get("message"))
-    if validation_report.get("warnings"):
-        for warn in validation_report["warnings"]:
+        for warn in warnings:
             logger.warning("    quality warning: [%s] %s", warn.get("rule"), warn.get("message"))
+    normalization = validation_report.get("deterministic_normalization") or {}
+    if normalization.get("applied"):
+        logger.info(
+            "    deterministic normalization applied: %s",
+            normalization.get("normalized_columns"),
+        )
+        for action in normalization.get("actions") or []:
+            logger.info("      [%s] %s", action.get("column"), action.get("action"))
     if validation_report.get("role_violations"):
         for v in validation_report["role_violations"]:
             logger.warning("    role violation: [%s] %s (role=%s) — %s",
@@ -547,9 +577,55 @@ def repair_preprocessing_code_node(state: CreditRiskState):
     }
 
 
+def _log_fe_hypothesis(hypothesis: dict) -> None:
+    """Log an FE hypothesis dict as per-field lines with bold-friendly labels."""
+    logger.info("    FE hypothesis:")
+    for key in ("interactions_rationale", "dropped_features_rationale", "expected_impact"):
+        val = hypothesis.get(key)
+        if val:
+            val_str = str(val)
+            if len(val_str) > 300:
+                val_str = val_str[:300] + "..."
+            logger.info("      %s: %s", key, val_str)
+    acted_on = hypothesis.get("eda_hypotheses_acted_on")
+    if acted_on:
+        logger.info("      eda_hypotheses_acted_on:")
+        for item in list(acted_on)[:5]:
+            logger.info("        - %s", item)
+
+
 # Generate feature engineering code via LLM.
 def generate_feature_engineering_code_node(state: CreditRiskState):
     logger.info(">>> generate-feature-engineering-code")
+    if state.deferred_categorical_columns:
+        logger.info("    deferred categoricals: %s", state.deferred_categorical_columns)
+    if FEATURE_ENGINEERING_MODE != "llm":
+        if FEATURE_ENGINEERING_MODE != "deterministic":
+            logger.warning(
+                "    unknown FEATURE_ENGINEERING_MODE=%r; using deterministic safe path",
+                FEATURE_ENGINEERING_MODE,
+            )
+        else:
+            logger.info(
+                "    feature engineering mode: deterministic safe path "
+                "(set BT5151_FEATURE_ENGINEERING_MODE=llm to enable LLM FE codegen)"
+            )
+        generated_code = deterministic_feature_engineering_fallback_code(
+            reason=(
+                "Deterministic feature-engineering mode is active; using validated "
+                "pass-through + categorical encoding instead of LLM-generated FE code."
+            ),
+            fallback_used=False,
+        )
+        hypothesis = generated_code.pop("hypothesis", None)
+        if hypothesis:
+            _log_fe_hypothesis(hypothesis)
+        return {
+            "feature_engineering_code": generated_code,
+            "feature_engineering_hypothesis": hypothesis,
+            "feature_engineering_attempt_count": 1,
+        }
+
     generated_code = generate_feature_engineering_code(
         state.train_frame,
         state.test_frame,
@@ -557,6 +633,7 @@ def generate_feature_engineering_code_node(state: CreditRiskState):
         state.dataset_profile,
         eda_report=state.eda_report,
         eda_hypotheses=state.eda_hypotheses,
+        deferred_categorical_columns=state.deferred_categorical_columns,
     )
     logger.info("    entrypoint: %s, code length: %d chars",
                 generated_code.get("entrypoint"), len(generated_code.get("code", "")))
@@ -564,7 +641,7 @@ def generate_feature_engineering_code_node(state: CreditRiskState):
     # Extract and log hypothesis if provided by the LLM.
     hypothesis = generated_code.pop("hypothesis", None)
     if hypothesis:
-        logger.info("    FE hypothesis: %s", json.dumps(hypothesis, default=str))
+        _log_fe_hypothesis(hypothesis)
 
     return {
         "feature_engineering_code": generated_code,
@@ -595,6 +672,7 @@ def execute_feature_engineering_node(state: CreditRiskState):
         state.test_frame,
         state.feature_engineering_code,
         run_root,
+        deferred_categorical_columns=state.deferred_categorical_columns,
     )
     exec_log = execution_result.get("execution_log", {})
     logger.info("    returncode: %s, timed_out: %s, success: %s",
@@ -607,14 +685,55 @@ def execute_feature_engineering_node(state: CreditRiskState):
     return {"feature_engineering_execution_log": execution_result}
 
 
+def _top_mi_features_for_fe_validation(state: CreditRiskState, limit: int = 5) -> list[str] | None:
+    """Return FE-survivable top-MI features only.
+
+    Raw EDA may rank identifiers or other leakage-prone columns highly
+    (`Customer_ID`, `SSN`, `ID`). Preprocessing is supposed to drop those, so FE
+    validation must not later demand that they still survive. This helper filters
+    top-MI candidates against the dataset policy and explicit drop actions before
+    the preservation contract is applied.
+    """
+    top_features = (state.eda_report or {}).get("top_discriminative_features") or []
+    if not top_features:
+        return None
+
+    dataset_policy = state.dataset_policy_spec or {}
+    transforms = ((state.column_transform_spec or {}).get("transforms") or {})
+
+    blocked: set[str] = set(dataset_policy.get("identifier_columns") or [])
+    for key in ("group_column", "target_column"):
+        value = dataset_policy.get(key)
+        if value:
+            blocked.add(str(value))
+
+    for column_name, spec in transforms.items():
+        if isinstance(spec, dict) and str(spec.get("action") or "").lower() == "drop":
+            blocked.add(str(column_name))
+
+    filtered: list[str] = []
+    seen: set[str] = set()
+    for feature in top_features:
+        column = feature.get("column") if isinstance(feature, dict) else feature
+        if not column:
+            continue
+        column = str(column)
+        if column in blocked or column in seen:
+            continue
+        filtered.append(column)
+        seen.add(column)
+        if len(filtered) >= limit:
+            break
+
+    return filtered or None
+
+
 # Validate FE output and overwrite train/test frames on success.
 def validate_feature_engineering_node(state: CreditRiskState):
     logger.info(">>> validate-feature-engineering")
     execution_result = state.feature_engineering_execution_log or {}
-    # Extract top-5 MI raw feature names for the drop-protection validator.
-    _top_mi = None
-    if state.eda_report and state.eda_report.get("top_discriminative_features"):
-        _top_mi = [f["column"] for f in state.eda_report["top_discriminative_features"][:5]]
+    # Extract top-MI feature names that are expected to survive preprocessing.
+    _top_mi = _top_mi_features_for_fe_validation(state)
     validation_report = validate_feature_engineering_output(
         execution_result,
         original_train_rows=len(state.train_frame),
@@ -624,10 +743,15 @@ def validate_feature_engineering_node(state: CreditRiskState):
         top_mi_features=_top_mi,
         train_frame_pre_fe=state.train_frame,
     )
-    logger.info("    validation passed: %s, checks: %s", validation_report.get("passed"), validation_report.get("checks"))
-    if validation_report.get("errors"):
-        for err in validation_report["errors"]:
+    if validation_report.get("passed"):
+        logger.info("    validation passed")
+    else:
+        failed_checks = [k for k, v in (validation_report.get("checks") or {}).items() if not v]
+        logger.warning("    validation FAILED — failed checks: %s", failed_checks)
+        for err in (validation_report.get("errors") or []):
             logger.warning("    validation error: [%s] %s", err.get("rule"), err.get("message"))
+        for err in (validation_report.get("lineage_violations") or []):
+            logger.warning("    lineage violation: [%s] %s", err.get("rule"), err.get("message"))
 
     if not validation_report["passed"]:
         return {"feature_engineering_validation_report": validation_report}
@@ -711,9 +835,15 @@ def repair_feature_engineering_code_node(state: CreditRiskState):
     attempt_count = state.feature_engineering_attempt_count or 0
     logger.warning(">>> repair-feature-engineering-code (attempt %d/%d)", attempt_count, MAX_FE_REPAIR_ATTEMPTS)
     if attempt_count >= MAX_FE_REPAIR_ATTEMPTS:
-        raise RuntimeError(
-            f"Feature engineering repair failed after {attempt_count} attempts."
+        logger.warning(
+            "    FE repair attempts exhausted; using deterministic fallback feature engineering code."
         )
+        fallback_code = deterministic_feature_engineering_fallback_code()
+        return {
+            "feature_engineering_code": fallback_code,
+            "feature_engineering_hypothesis": fallback_code.get("hypothesis", {}),
+            "feature_engineering_attempt_count": attempt_count + 1,
+        }
 
     exec_result = state.feature_engineering_execution_log or {}
     repaired_code = repair_feature_engineering_code(
@@ -723,6 +853,7 @@ def repair_feature_engineering_code_node(state: CreditRiskState):
         validation_report=state.feature_engineering_validation_report or {},
         feature_columns=state.feature_columns,
         dataset_profile=state.dataset_profile,
+        deferred_categorical_columns=state.deferred_categorical_columns,
     )
     return {
         "feature_engineering_code": repaired_code,

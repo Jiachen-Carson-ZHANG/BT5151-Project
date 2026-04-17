@@ -141,6 +141,34 @@ def test_graph_contains_required_nodes():
     assert hasattr(graph.compile(), "invoke")
 
 
+def test_generate_feature_engineering_defaults_to_deterministic_safe_path(monkeypatch):
+    """Production FE should not spend repair loops on LLM codegen unless explicitly enabled."""
+    monkeypatch.setattr(graph_module, "FEATURE_ENGINEERING_MODE", "deterministic")
+
+    def fail_if_llm_codegen_called(*args, **kwargs):
+        raise AssertionError("LLM feature engineering codegen should not be called in deterministic mode")
+
+    monkeypatch.setattr(graph_module, "generate_feature_engineering_code", fail_if_llm_codegen_called)
+
+    state = SimpleNamespace(
+        train_frame=pd.DataFrame({"Age": [30, 40], "Occupation": ["Engineer", "Doctor"]}),
+        test_frame=pd.DataFrame({"Age": [35], "Occupation": ["Engineer"]}),
+        feature_columns=["Age", "Occupation"],
+        dataset_profile={"row_count": 3},
+        eda_report={},
+        eda_hypotheses={},
+        deferred_categorical_columns={"Occupation": 2},
+    )
+
+    result = graph_module.generate_feature_engineering_code_node(state)
+
+    assert result["feature_engineering_attempt_count"] == 1
+    assert "code" in result["feature_engineering_code"]
+    assert result["feature_engineering_hypothesis"]["interactions_rationale"].startswith(
+        "Deterministic feature engineering"
+    )
+
+
 def test_route_after_quality_review_only_accepts_minor_issues_after_retries():
     state = SimpleNamespace(
         preprocessing_validation_report={"structural_passed": True, "passed": False},
@@ -230,7 +258,15 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
             "summary": "Synthetic quality review for graph test.",
         }
 
-    def fake_generate_feature_engineering_code(train_frame, test_frame, feature_columns, dataset_profile, eda_report=None, eda_hypotheses=None):
+    def fake_generate_feature_engineering_code(
+        train_frame,
+        test_frame,
+        feature_columns,
+        dataset_profile,
+        eda_report=None,
+        eda_hypotheses=None,
+        deferred_categorical_columns=None,
+    ):
         call_sequence.append("generate-feature-engineering-code")
         # Identity transform — writes train/test through unchanged.
         code = (
@@ -438,6 +474,55 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     assert len(result["local_xai_cases"]) >= 1
     assert result["analysis_bundle"] is not None
     assert result["analysis_bundle_summary"] is not None
+
+
+def test_validate_feature_engineering_node_filters_identifier_top_mi_features(monkeypatch):
+    """Identifier/group/target/drop-policy columns must not be enforced as FE survivors."""
+    captured: dict[str, object] = {}
+
+    def fake_validate_feature_engineering_output(*args, **kwargs):
+        captured["top_mi_features"] = kwargs.get("top_mi_features")
+        return {"passed": False, "checks": {}, "errors": []}
+
+    monkeypatch.setattr(graph_module, "validate_feature_engineering_output", fake_validate_feature_engineering_output)
+
+    state = SimpleNamespace(
+        feature_engineering_execution_log={"artifacts": {}},
+        train_frame=pd.DataFrame({"Annual_Income": [50000.0, 60000.0], "Outstanding_Debt": [1000.0, 2000.0]}),
+        test_frame=pd.DataFrame({"Annual_Income": [55000.0], "Outstanding_Debt": [1500.0]}),
+        feature_columns=["Annual_Income", "Outstanding_Debt"],
+        deferred_categorical_columns={},
+        eda_report={
+            "top_discriminative_features": [
+                {"column": "Customer_ID"},
+                {"column": "SSN"},
+                {"column": "ID"},
+                {"column": "Annual_Income"},
+                {"column": "Outstanding_Debt"},
+                {"column": "Credit_Mix"},
+            ]
+        },
+        dataset_policy_spec={
+            "identifier_columns": ["ID", "SSN"],
+            "group_column": "Customer_ID",
+            "target_column": "Credit_Score",
+        },
+        column_transform_spec={
+            "transforms": {
+                "Customer_ID": {"action": "drop"},
+                "SSN": {"action": "drop"},
+                "ID": {"action": "drop"},
+                "Credit_Score": {"action": "drop"},
+                "Annual_Income": {"action": "keep"},
+                "Outstanding_Debt": {"action": "keep"},
+                "Credit_Mix": {"action": "keep"},
+            }
+        },
+    )
+
+    graph_module.validate_feature_engineering_node(state)
+
+    assert captured["top_mi_features"] == ["Annual_Income", "Outstanding_Debt", "Credit_Mix"]
 
 
 # ---------------------------------------------------------------------------

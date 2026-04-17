@@ -84,6 +84,81 @@ class TestColdStart:
 
         assert demo is not None
 
+    def test_build_app_exposes_sticky_trace_and_toolbar_ids(self):
+        """Layout hooks for the evidence toolbar and sticky trace sidebar must exist."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        with patch.object(app_mod, "_get_state", return_value=_mock_state()):
+            demo = app_mod.build_app()
+            cfg = demo.get_config_file()
+
+        elem_ids = {
+            c.get("props", {}).get("elem_id")
+            for c in cfg["components"]
+            if c.get("props", {}).get("elem_id")
+        }
+        assert {
+            "evidence-toolbar",
+            "evidence-toolbar-copy",
+            "evidence-toolbar-actions",
+            "evidence-refresh-btn",
+            "trace-layout",
+            "trace-left-col",
+            "trace-right-col",
+            "trace-pipeline",
+            "trace-log",
+        }.issubset(elem_ids)
+        assert "evidence-advanced-btn" not in elem_ids
+
+    def test_trace_sidebar_css_keeps_pipeline_sticky_without_inner_log_scroll(self):
+        """Developer Trace should use page scroll, with the left pipeline column sticky."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        css = app_mod._app_css()
+
+        gradio_container_block = css.split(".gradio-container {", 1)[1].split("}", 1)[0]
+        assert "overflow: visible" in gradio_container_block
+
+        assert "#trace-left-col" in css
+        trace_left_block = css.split("#trace-left-col", 1)[1].split("}", 1)[0]
+        assert "position: sticky" in trace_left_block
+        assert "top: 88px" in trace_left_block
+        assert "flex-direction: column" in trace_left_block
+        assert "max-height: calc(100dvh - 112px)" in trace_left_block
+        assert "overflow-y: auto" in trace_left_block
+
+        trace_children_block = css.split("#trace-left-col > *", 1)[1].split("}", 1)[0]
+        assert "width: 100%" in trace_children_block
+        assert "min-width: 0" in trace_children_block
+
+        trace_log_block = css.split("#trace-log", 1)[1].split("}", 1)[0]
+        assert "overflow: visible" in trace_log_block
+        assert "max-height" not in trace_log_block
+        assert "overflow-y: auto" not in trace_log_block
+
+    def test_pipeline_html_wraps_title_and_body_in_one_component(self):
+        """Pipeline title and body must stay in one HTML component to avoid clipping."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        html = app_mod._wrap_pipeline_html("<div class='step'>train-models</div>")
+
+        assert "trace-pipeline-shell" in html
+        assert "trace-pipeline-title" in html
+        assert "Pipeline" in html
+        assert "train-models" in html
+
     def test_cb_predict_returns_no_cache_message_when_state_is_none(self):
         """cb_predict must not crash when no cache is loaded."""
         import importlib
@@ -93,7 +168,7 @@ class TestColdStart:
         importlib.reload(app_mod)
 
         with patch.object(app_mod, "_get_state", return_value=None):
-            result = app_mod.cb_predict(0)
+            result = list(app_mod.cb_predict(0))[-1]
 
         # First element is the risk_html / status message
         first = result[0] if isinstance(result, (list, tuple)) else result
@@ -211,8 +286,9 @@ class TestBusinessView:
         mock_action = {"action": "Approve", "rationale": "Strong financials."}
 
         with patch.object(app_mod, "_get_state", return_value=_mock_state()):
-            with patch.object(app_mod, "_predict", return_value=(mock_pred, mock_risk, mock_action)):
-                result = app_mod.cb_predict(0)
+            with patch.object(app_mod, "_run_inference_step", return_value=(mock_pred, _mock_state())):
+                with patch.object(app_mod, "_run_explain_step", return_value=(mock_risk, mock_action)):
+                    result = list(app_mod.cb_predict(0))[-1]
 
         assert isinstance(result, (list, tuple))
         risk_html = result[0]
@@ -234,6 +310,7 @@ class TestModelEvidence:
             result = app_mod.cb_model_overview()
 
         assert isinstance(result, (list, tuple))
+        assert len(result) == 5
         # metrics DataFrame should be first element
         import pandas as pd
 
@@ -254,6 +331,152 @@ class TestModelEvidence:
         # Confusion matrix figure (plt.Figure or None) should be in the result
         # It can be None if matplotlib not available, but not an exception
         assert result is not None
+
+    def test_cb_model_overview_charts_returns_file_backed_chart_images(self):
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        state = _mock_state()
+        state.global_xai_results = {
+            "methods_used": ["shap", "pdp", "ale"],
+            "shap": {
+                "beeswarm_data": {
+                    "Age": {
+                        "shap_values": [0.1, -0.2, 0.05],
+                        "feature_values": [25, 40, 55],
+                    }
+                },
+                "dependence_data": {
+                    "Age": {
+                        "Good": {"feature_values": [25, 40], "shap_values": [0.1, 0.2]},
+                        "Poor": {"feature_values": [30, 50], "shap_values": [-0.2, -0.1]},
+                        "Standard": {"feature_values": [35, 45], "shap_values": [0.0, 0.05]},
+                    }
+                },
+            },
+            "pdp": {
+                "Age": {
+                    "grid": [20, 40, 60],
+                    "pd_values": {
+                        "Good": [0.6, 0.5, 0.4],
+                        "Poor": [0.2, 0.3, 0.4],
+                        "Standard": [0.2, 0.2, 0.2],
+                    },
+                },
+                "Annual_Income": {
+                    "grid": [30000, 60000, 90000],
+                    "pd_values": {
+                        "Good": [0.3, 0.5, 0.7],
+                        "Poor": [0.5, 0.3, 0.2],
+                        "Standard": [0.2, 0.2, 0.1],
+                    },
+                },
+            },
+            "ale": {
+                "Age": {
+                    "bin_centres": [25, 45, 55],
+                    "ale_values": {
+                        "Good": [0.05, 0.02, -0.01],
+                        "Poor": [-0.03, 0.0, 0.04],
+                        "Standard": [0.01, 0.0, -0.01],
+                    },
+                },
+                "Annual_Income": {
+                    "bin_centres": [35000, 65000, 85000],
+                    "ale_values": {
+                        "Good": [0.01, 0.03, 0.04],
+                        "Poor": [-0.02, -0.01, 0.0],
+                        "Standard": [0.0, 0.0, -0.01],
+                    },
+                },
+            },
+        }
+
+        with patch.object(app_mod, "_get_state", return_value=state):
+            result = app_mod.cb_model_overview_charts()
+
+        assert isinstance(result, (list, tuple))
+        assert len(result) == 4
+        for item in result:
+            assert isinstance(item, str)
+            assert item
+
+    def test_model_evidence_heavy_charts_can_load_individually(self):
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        state = _mock_state()
+        state.global_xai_results = {
+            "methods_used": ["shap", "pdp", "ale"],
+            "shap": {
+                "beeswarm_data": {
+                    "Age": {
+                        "shap_values": [0.1, -0.2, 0.05],
+                        "feature_values": [25, 40, 55],
+                    }
+                },
+                "dependence_data": {
+                    "Age": {
+                        "Good": {"feature_values": [25, 40], "shap_values": [0.1, 0.2]},
+                        "Poor": {"feature_values": [30, 50], "shap_values": [-0.2, -0.1]},
+                        "Standard": {"feature_values": [35, 45], "shap_values": [0.0, 0.05]},
+                    }
+                },
+            },
+            "pdp": {
+                "Age": {
+                    "grid": [20, 40, 60],
+                    "pd_values": {
+                        "Good": [0.6, 0.5, 0.4],
+                        "Poor": [0.2, 0.3, 0.4],
+                        "Standard": [0.2, 0.2, 0.2],
+                    },
+                },
+                "Annual_Income": {
+                    "grid": [30000, 60000, 90000],
+                    "pd_values": {
+                        "Good": [0.3, 0.5, 0.7],
+                        "Poor": [0.5, 0.3, 0.2],
+                        "Standard": [0.2, 0.2, 0.1],
+                    },
+                },
+            },
+            "ale": {
+                "Age": {
+                    "bin_centres": [25, 45, 55],
+                    "ale_values": {
+                        "Good": [0.05, 0.02, -0.01],
+                        "Poor": [-0.03, 0.0, 0.04],
+                        "Standard": [0.01, 0.0, -0.01],
+                    },
+                },
+                "Annual_Income": {
+                    "bin_centres": [35000, 65000, 85000],
+                    "ale_values": {
+                        "Good": [0.01, 0.03, 0.04],
+                        "Poor": [-0.02, -0.01, 0.0],
+                        "Standard": [0.0, 0.0, -0.01],
+                    },
+                },
+            },
+        }
+
+        with patch.object(app_mod, "_get_state", return_value=state):
+            shap = app_mod.cb_model_shap_chart()
+            pdp_ale = app_mod.cb_model_pdp_ale_charts()
+            dependence = app_mod.cb_model_dependence_chart()
+
+        assert isinstance(shap, str)
+        assert isinstance(pdp_ale, tuple)
+        assert len(pdp_ale) == 2
+        assert all(isinstance(item, str) for item in pdp_ale)
+        assert isinstance(dependence, str)
 
     def test_cb_model_overview_handles_nested_hypothesis_validation_dict(self):
         import importlib
@@ -304,13 +527,108 @@ class TestModelEvidence:
 
         assert result is not None
 
+    def test_cb_model_overview_charts_returns_empty_values_when_state_none(self):
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        with patch.object(app_mod, "_get_state", return_value=None):
+            result = app_mod.cb_model_overview_charts()
+
+        assert result == (None, None, None, None)
+
 
 # ---------------------------------------------------------------------------
 # Task 8: Developer Trace — cb_developer_trace callback behavior
 # ---------------------------------------------------------------------------
 class TestDeveloperTrace:
-    def test_cb_developer_trace_uses_active_run_trace_when_alive(self, tmp_path, monkeypatch):
-        """cb_developer_trace must use active_run.trace_path when PID is alive."""
+    def test_cb_poll_trace_honors_pinned_historical_log_selection(self, tmp_path, monkeypatch):
+        """Timer polling must not overwrite a manually selected historical run."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        historical_log = tmp_path / "stage_full_20260415_131136.log"
+        historical_log.write_text(
+            "13:38:03 INFO    bt5151_credit_risk.graph  >>> evaluate-models\n",
+            encoding="utf-8",
+        )
+        live_trace = tmp_path / "trace_events_20260417_124505.jsonl"
+        live_trace.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260417_124505",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "validate-feature-engineering",
+                    "status": "fail",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        active = {
+            "run_id": "20260417_124505",
+            "status": "running",
+            "pid": os.getpid(),
+            "pid_start_time": __import__("psutil").Process(os.getpid()).create_time(),
+            "trace_path": str(live_trace),
+        }
+
+        monkeypatch.setattr(app_mod, "_historical_log_dir", lambda: tmp_path)
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: active)
+
+        with patch.object(app_mod, "_get_state", return_value=None):
+            pipeline_html, trace_md, _ = app_mod.cb_poll_trace(historical_log.name)
+
+        assert "evaluate-models" in trace_md
+        assert "validate-feature-engineering" not in trace_md
+        assert "evaluate" in pipeline_html.lower()
+
+    def test_cb_load_historical_log_empty_selection_returns_auto_trace(self, tmp_path, monkeypatch):
+        """Clearing the historical selection should fall back to live/cached auto mode."""
+        import importlib
+
+        import app as app_mod
+
+        importlib.reload(app_mod)
+
+        cached_trace = tmp_path / "trace_events_cached.jsonl"
+        cached_trace.write_text(
+            json.dumps(
+                {
+                    "run_id": "20260416_012744",
+                    "stage": "full",
+                    "event_type": "node_complete",
+                    "node": "train-models",
+                    "status": "pass",
+                }
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+        state = _mock_state()
+        state.cache_trace_path = str(cached_trace)
+        state.cache_log_path = None
+
+        monkeypatch.setattr(app_mod, "_historical_log_dir", lambda: tmp_path)
+        monkeypatch.setattr("bt5151_credit_risk.run_status.read_active_run", lambda: None)
+
+        with patch.object(app_mod, "_get_state", return_value=state):
+            pipeline_html, trace_md, selected = app_mod.cb_load_historical_log("")
+
+        assert selected is None
+        assert "train-models" in trace_md
+        assert "train" in pipeline_html.lower()
+
+    def test_cb_developer_trace_prefers_active_run_log_when_alive(self, tmp_path, monkeypatch):
+        """Live runs should use the raw log so long-running nodes appear before trace completion."""
         import importlib
 
         import app as app_mod
@@ -327,9 +645,9 @@ class TestDeveloperTrace:
                             "run_id": "20260416_120000",
                             "stage": "full",
                             "event_type": "node_complete",
-                            "node": "train-models",
+                            "node": "validate-feature-engineering",
                             "status": "pass",
-                            "state_keys_written": ["trained_models"],
+                            "state_keys_written": ["feature_engineering_validation_report"],
                         }
                     ),
                 ]
@@ -339,7 +657,7 @@ class TestDeveloperTrace:
         )
         raw_log = tmp_path / "stage_full_20260416_120000.log"
         raw_log.write_text(
-            "12:00:00 INFO    bt5151_credit_risk.graph  >>> evaluate-models\n",
+            "12:00:00 INFO    bt5151_credit_risk.graph  >>> train-models\n",
             encoding="utf-8",
         )
 
@@ -359,7 +677,7 @@ class TestDeveloperTrace:
 
         assert "20260416_120000" in result
         assert "train-models" in result
-        assert "evaluate-models" not in result
+        assert "validate-feature-engineering" not in result
 
     def test_cb_developer_trace_uses_active_run_trace_when_failed(self, tmp_path, monkeypatch):
         """Failed active runs should still render their own trace artifact."""
@@ -787,7 +1105,7 @@ class TestCacheReload:
 
         app_mod._state = None
         new_state = _mock_state()
-        monkeypatch.setattr("bt5151_credit_risk.cache.load_cache", lambda: new_state)
+        monkeypatch.setattr("bt5151_credit_risk.cache.load_cache", lambda path=None: new_state)
 
         result = app_mod._get_state()
         assert result is new_state

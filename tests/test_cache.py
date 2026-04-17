@@ -6,6 +6,7 @@ import pytest
 def test_save_cache_persists_provenance_metadata(tmp_path, monkeypatch):
     import bt5151_credit_risk.cache as cache_mod
 
+    monkeypatch.setattr(cache_mod, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(cache_mod, "CACHE_FILE", tmp_path / "pipeline_state.pkl")
 
     from bt5151_credit_risk.cache import load_cache, save_cache
@@ -33,6 +34,7 @@ def test_save_cache_persists_provenance_metadata(tmp_path, monkeypatch):
 def test_save_cache_without_metadata_does_not_crash(tmp_path, monkeypatch):
     import bt5151_credit_risk.cache as cache_mod
 
+    monkeypatch.setattr(cache_mod, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(cache_mod, "CACHE_FILE", tmp_path / "pipeline_state.pkl")
 
     from bt5151_credit_risk.cache import load_cache, save_cache
@@ -93,6 +95,7 @@ def test_cache_log_path_accessible_from_state(tmp_path, monkeypatch):
     """Loaded CreditRiskState exposes provenance fields."""
     import bt5151_credit_risk.cache as cache_mod
 
+    monkeypatch.setattr(cache_mod, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(cache_mod, "CACHE_FILE", tmp_path / "pipeline_state.pkl")
 
     from bt5151_credit_risk.cache import load_cache, save_cache
