@@ -172,11 +172,20 @@ After a full pipeline run, an interactive prediction UI is available:
 
 ```bash
 # Step 1 — run pipeline and save trained state (one-off, ~1–2 h)
-PYTHONPATH=src python run_stage.py full 42 --save-cache
+PYTHONPATH=src .venv/bin/python3 run_stage.py full 42 --save-cache
 
 # Step 2 — launch the app (instant reload from cache)
-PYTHONPATH=src python app.py
+cd "/home/tough/BT5151 GroupProject"
+PYTHONPATH=src .venv/bin/python3 app.py
 # → http://localhost:7860
+
+# Restart if port 7860 is already in use
+lsof -tiTCP:7860 -sTCP:LISTEN | xargs -r kill
+PYTHONPATH=src .venv/bin/python3 app.py
+
+# Or use a different port
+GRADIO_SERVER_PORT=7861 PYTHONPATH=src .venv/bin/python3 app.py
+# → http://localhost:7861
 ```
 
 Three tabs: **Customer Prediction** (row picker → prediction + SHAP waterfall + LLM explanation + recommended action), **Model Overview** (eval metrics + global SHAP importance), **EDA Hypotheses** (three-tier hypothesis output from EDA layer).

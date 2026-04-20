@@ -1,5 +1,353 @@
 # Implementation Log
 
+## 2026-04-17 — Live pipeline rail overlays JSONL completion status on raw logs
+
+**Context:** During a live run, the Developer Trace sidebar could show `global-xai` as blue/running even after the right-hand raw log card showed global XAI had produced its completion summaries. The backend was not stuck: the same run continued through `local-xai`, `shortcut-feature-audit`, `interpret-global-xai`, `interpret-local-xai`, packaging, inference, explanation, cache save, and run completion. The root cause was the live-trace compromise: raw logs are freshest but only contain `>>> node-start` markers, while structured JSONL records true node completion but can lag during long nodes.
+
+**Changes (`src/bt5151_credit_risk/ui_trace.py`, `app.py`, `tests/test_ui_trace.py`):**
+1. Added `parse_live_trace_artifacts(log_path, trace_path)` to parse the live raw log and overlay structured JSONL completion statuses by node occurrence.
+2. The pipeline rail now keeps completed live nodes green when JSONL confirms completion, while still marking a newer raw-log node blue if JSONL has not completed it yet.
+3. Tab 3 live polling uses the hybrid parser for the pipeline rail. The right-hand log remains raw-log based for freshness.
+4. Added regression tests for both sides of the behavior: completed `global-xai` must not pulse, and a raw-log node after the last JSONL completion must pulse.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_ui_trace.py tests/test_app.py::TestDeveloperTrace -q` → 30 passed. Real-log sanity check on `stage_full_20260417_190732.log` + `trace_events_20260417_190732.jsonl` shows `global-xai`, `local-xai`, `shortcut-feature-audit`, `interpret-global-xai`, and `interpret-local-xai` green with zero pulsing nodes after completion.
+
+**Must remain true:**
+- Raw logs remain the live content source during active runs.
+- JSONL completion events should correct sidebar status when they exist.
+- The sidebar should only pulse for the newest raw node that has no matching completion event yet.
+
+## 2026-04-17 — Deterministic feature engineering is now the default production path
+
+**Context:** The FE node repeatedly produced generated artifacts that failed the deterministic contract: protected top-MI parents such as `Monthly_Inhand_Salary` were dropped by correlation heuristics, and declared ratio/product lineage did not replay against the actual engineered outputs. These failed attempts did not poison training once deterministic fallback passed, but they wasted repair cycles, looked like stuck runs in the UI, and made the demo path depend on unreliable generated code.
+
+**Changes (`src/bt5151_credit_risk/config.py`, `src/bt5151_credit_risk/graph.py`, `src/bt5151_credit_risk/feature_engineering.py`, tests):**
+1. Added `FEATURE_ENGINEERING_MODE`, defaulting to `deterministic`. Set `BT5151_FEATURE_ENGINEERING_MODE=llm` only when intentionally experimenting with LLM-generated FE code.
+2. `generate_feature_engineering_code_node()` now emits deterministic safe FE code by default, preserving validated preprocessing columns and encoding remaining categoricals before validation/training.
+3. The deterministic FE generator now records whether it was used as primary deterministic mode or as a repair-exhaustion fallback.
+4. Added a regression test proving deterministic mode does not call the LLM FE codegen path.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_graph.py tests/test_feature_engineering.py tests/test_feature_engineering_validation.py -q` → 28 passed.
+
+**Must remain true:**
+- Invalid LLM-generated FE artifacts must never enter training.
+- The assignment/demo path should run end-to-end without relying on FE repair loops.
+- LLM FE remains opt-in experimentation, not the default production contract.
+
+## 2026-04-17 — Live Developer Trace now prefers raw logs while a run is active
+
+**Context:** A frontend run appeared stuck at `validate-feature-engineering` even though the backend had already exhausted FE repair attempts, used the deterministic fallback, passed FE validation, and moved into `train-models`. The live UI was reading `trace_events_*.jsonl` first. That structured trace only emits node completion events, so it stayed stale throughout long-running nodes. The raw stage log already contained `>>> train-models`, but it was only used as fallback.
+
+**Changes (`app.py`, `tests/test_app.py`):**
+1. `cb_developer_trace()` now prefers `active_run.log_path` over `active_run.trace_path` while `active_run.status == "running"` and the PID is alive.
+2. Completed, failed, cached, and historical traces still prefer structured trace artifacts, preserving the richer post-run cards.
+3. Added a regression test proving an alive active run shows the raw-log `train-models` marker instead of stale structured-trace `validate-feature-engineering`.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py::TestDeveloperTrace tests/test_ui_trace.py -q` → 28 passed.
+
+**Must remain true:**
+- Live runs should show long-running in-progress nodes from the raw log.
+- Failed/completed/cached runs should keep using structured traces when available.
+- Historical run selection must remain pinned and must not be overwritten by polling.
+
+## 2026-04-17 — FE execution contract fixed plus deterministic fallback safety net
+
+**Context:** The latest full run failed in feature engineering before writing artifacts. The first generated FE code crashed on a missing interaction parent in its raw-parent snapshot. The repair code then correctly tried to encode deferred categoricals, but referenced `deferred_categorical_columns` as if it were available inside the generated module. The execution wrapper only called `engineer_features(train_df, test_df, workspace_path)`, so that global was missing, the code silently skipped the deferred encoding block, and `Occupation` remained non-numeric until the assertion killed the run.
+
+**Changes (`src/bt5151_credit_risk/feature_engineering.py`, `src/bt5151_credit_risk/graph.py`, tests):**
+1. `execute_feature_engineering()` now accepts `deferred_categorical_columns`, writes it to the FE workspace, and injects it into the generated module before calling the entrypoint. The graph passes `state.deferred_categorical_columns` into execution.
+2. FE lineage validation now accepts generated categorical lineage aliases: `input_stage="pre_fe_raw_categorical"` and operation alias `frequency_encoding`.
+3. Added `deterministic_feature_engineering_fallback_code()`: when all LLM FE repair attempts are exhausted, the repair node returns conservative deterministic FE code instead of raising immediately. The fallback preserves preprocessed columns, encodes object columns, fills numeric gaps using train medians, and writes `feature_engineering_report.json` plus `feature_lineage.json`.
+4. Added regression tests for deferred-categorical injection, categorical lineage aliases, and fallback artifact validity.
+
+**Verification:** Replayed the exact latest failed FE repair workspace (`feature_engineering_4343bab9a9dc451c81b5a426a67c0760`) through the patched executor with `{"Occupation": 15}`; execution returned `success=True` and validation returned `passed=True` with no errors or lineage violations. `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_feature_engineering.py tests/test_feature_engineering_validation.py tests/test_graph.py -q` → 27 passed.
+
+**Must remain true:**
+- Generated FE code must receive deferred categorical metadata at execution time, not only in the LLM prompt payload.
+- Exhausting LLM FE repair attempts should not kill the whole pipeline if a deterministic safe representation can be produced.
+- The fallback must be logged and conservative; it must not silently invent high-risk engineered features.
+
+## 2026-04-17 — Feature lineage replay now uses exact report formulas
+
+**Context:** The latest full run reached feature engineering, produced a structurally valid repaired FE artifact, and then failed validation because `feature_lineage.json` only declared coarse operations such as `ratio` or `product`. The validator replayed those as simple `a / b` or `a * b`, falsely rejecting valid formulas like `(Monthly_Inhand_Salary - Total_EMI_per_month) / Monthly_Inhand_Salary`, `Num_Credit_Inquiries / (Num_Credit_Card + 1)`, and `Outstanding_Debt * Interest_Rate / 100`.
+
+**Changes (`src/bt5151_credit_risk/feature_engineering.py`, `src/bt5151_credit_risk/graph.py`, `tests/test_feature_engineering_validation.py`):**
+1. Added a safe arithmetic formula replay path for formulas declared in `feature_engineering_report.json`. It supports column names, `df["column"]` references, numeric constants, `+`, `-`, `*`, `/`, unary signs, and `log1p`.
+2. Formula replay is now preferred over coarse lineage operations when available. The old operation replay remains as fallback for older artifacts.
+3. Added documented fill/clip candidate handling for lineage entries with stability metadata, so formula replay can match generated ratio stabilization without accepting unrelated math.
+4. FE validation now logs lineage violations directly in the stage log instead of hiding the true cause inside `feature_contract_report.json`.
+5. Added a regression test reproducing the composed-formula false failure from the latest run, plus kept the negative log-transformed-parent test green.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_feature_engineering_validation.py -q` → 12 passed. Replaying the patched validator against the actual repaired workspace from `feature_engineering_26b162e9fc9541bc9e29d8fd7c5b9311` now returns `passed=True` with no lineage violations.
+
+**Must remain true:**
+- FE lineage validation must reject wrong math, not reject correct formulas because the lineage operation enum is too coarse.
+- Ratios/products must still use pre-FE raw numeric parents unless explicitly declared otherwise.
+- Lineage failures must be visible in the stage log so future repair loops are diagnosable from the UI.
+
+## 2026-04-17 — Deterministic preprocessing normalization for unstable generated columns
+
+**Context:** The remaining full-run failures were no longer mainly about prompts or FE. The validator was correctly catching two real preprocessing instability families, but generated code still varied run to run: `Credit_History_Age` could be reparsed and then re-broken by implausible imputation, and `Type_of_Loan` could still carry double-encoded missingness (`Type_of_Loan_missing` plus `Type_of_Loan_Not Specified`) even after repair. The root issue was architectural: we were asking prompt guidance to enforce artifact-level invariants that belong at the preprocessing contract boundary.
+
+**Changes (`src/bt5151_credit_risk/preprocess.py`, `src/bt5151_credit_risk/graph.py`, `tests/test_preprocess.py`):**
+1. Added `normalize_preprocessing_artifacts()`, called inside `validate_preprocessing_output()` before the structural/semantic checks run. The normalizer reparses `Credit_History_Age` from `raw_frame.csv`, caps it by plausible adulthood tenure using cleaned `Age`, fills residual gaps from group/global medians, and rewrites the saved feature/cleaned frames.
+2. Added deterministic normalization for `multi_value_set` missingness from the raw source: recompute `<col>_missing`, drop duplicate `Not Specified` dummy columns, coerce sibling indicators to binary, and zero sibling indicators when missingness fires.
+3. Validation reports now carry a `deterministic_normalization` section, persist it into `preprocessing_contract_report.json`, and log applied normalization actions in the graph node output.
+4. Added regression tests proving that broken `Credit_History_Age` and duplicate multi-value missingness are normalized before invariants run, so validation passes on repaired artifacts without relying on another LLM repair turn.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_preprocess.py -q` → 47 passed.
+
+**Must remain true:**
+- `Credit_History_Age` plausibility is enforced at the artifact boundary, not left to prompt compliance.
+- `_missing` sentinels and `Not Specified` one-hot columns must never coexist for the same multi-value field.
+- Deterministic normalization must remain observable in both the runtime log and `preprocessing_contract_report.json`.
+
+**Follow-up hardening:** New runs after the first normalizer patch exposed two boundary bugs: `pd.Series.fillna(grouped_median)` can crash when pandas nullable integer months receive fractional medians, and `Credit_History_Age` cannot be safely capped using a generated `Age` column that may itself be malformed. The normalizer now reparses `Age` from raw values first, fills/clips it to [18, 100], forces numeric helper series to float before group/global fill, and then uses normalized age for the credit-history cap. Regression coverage now includes both failure modes plus a copied real failed workspace sanity check.
+
+## 2026-04-17 — Raw stage logs now emit run-start / run-complete lifecycle nodes
+
+**Context:** In the Developer Trace sidebar, successful historical runs loaded from raw `stage_full_*.log` files still showed the last node as blue/running. The root cause was architectural: only structured JSONL traces carried lifecycle events like `run_start` and `run_complete`. Raw logs had the `=== Stage 'full' (...) ===` and `=== Stage 'full' completed in ... ===` markers, but `parse_stage_log()` ignored them, so the pipeline renderer never saw an explicit terminal event and assumed the last actual node was still running. The sidebar also skipped `run_start` entirely even when structured traces contained it.
+
+**Changes (`src/bt5151_credit_risk/ui_trace.py`, `tests/test_ui_trace.py`):**
+1. Added raw-log lifecycle parsing for stage start and stage completion markers. `parse_stage_log()` now synthesizes `run_start` and `run_complete` cards from the existing `run_stage` log lines.
+2. Stopped dropping `run_start` from the pipeline rail. The sidebar now shows a green lifecycle entry at the top when a run begins.
+3. Updated pending-node logic so `run_start` stays green instead of being incorrectly converted into the single blue “running” node. When only `run_start` exists, the remaining main-path stages render as pending below it.
+4. Added regression tests covering:
+   - raw log start/completion lifecycle synthesis
+   - completed raw runs showing no blue pulsing node
+   - in-progress raw logs showing green `run-start` plus a blue current stage
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_ui_trace.py -q` → 17 passed; `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py tests/test_ui_trace.py -q` → 46 passed. Real-log sanity check on `lab/logs/stage_full_20260416_012744.log` now shows cards beginning with `run_start` and ending with `run_complete`, and the generated pipeline HTML contains `run‑start` and `run‑complete` with no pulsing node.
+
+**Must remain true:**
+- Successful raw stage logs must terminate with a non-pulsing `run-complete` node.
+- `run-start` must be visible in the sidebar for both structured traces and raw stage logs.
+- The pipeline rail should only show a blue running node when the run has not reached a terminal lifecycle event.
+
+## 2026-04-17 — Historical trace pinning + FE top-MI leakage filter
+
+**Context:** Two separate bugs were distorting debugging. First, the Developer Trace dropdown looked broken because selecting any historical run was immediately overwritten by the 1-second poller, so every choice snapped back to the same live/cached trace. Second, several recent full runs failed in feature-engineering validation for the wrong reason: the FE top-MI preservation guard was using raw EDA leaders such as `Customer_ID`, `SSN`, and `ID`, even though preprocessing had correctly dropped them as identifiers/leakage.
+
+**Changes (`app.py`, `src/bt5151_credit_risk/ui_trace.py`, `src/bt5151_credit_risk/graph.py`):**
+1. Added `_historical_log_dir()` and explicit pinned historical selection state in the Gradio app. `cb_load_historical_log()` now returns the selected artifact key, and `cb_poll_trace()`/`cb_developer_trace()` accept that selection so timer ticks keep showing the chosen historical run instead of auto-reverting to the latest live/cached trace.
+2. Cleared the trace memoization path when no artifact is available or when a selected historical file is missing, preventing stale pipeline rails from lingering beside an error message.
+3. Changed `list_available_logs()` to order historical artifacts by actual file recency across JSONL traces and raw stage logs, while still preferring one structured trace per run when both exist. This removes the previous “all traces first, logs later” bias that made recent failures dominate the dropdown.
+4. Added `_top_mi_features_for_fe_validation()` in `graph.py` to filter out identifier columns, group columns, target columns, and any columns explicitly marked `action=drop` before passing top-MI features into FE validation. The FE preservation guard now applies only to features that are expected to survive preprocessing.
+5. Added regression tests for pinned historical selection surviving timer ticks, clearing back to auto mode, history ordering by recency rather than file type, and FE validation filtering out dropped identifier columns.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py -q` → 29 passed; `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_graph.py -q` → 11 passed; `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_ui_trace.py -q` → 14 passed.
+
+**Must remain true:**
+- A manually selected historical run must stay pinned until the user clears the dropdown.
+- Timer ticks must never overwrite a pinned historical trace with the current live/cached run.
+- FE top-MI preservation must ignore columns already dropped by leakage/identifier policy.
+- Historical run ordering in the dropdown should reflect real recency, not artifact type priority.
+
+## 2026-04-17 — Developer Trace pipeline ordering and failure visibility
+
+**Context:** The sticky pipeline rail was visible, but the node order was misleading. The sidebar used an old coarse canonical stage list (`preprocess`, `feature-engineering`) while the structured trace emits finer nodes (`inspect-preprocessing-code`, `execute-generated-preprocessing`, `validate-preprocessing-output`, repair loops). Unknown conditional nodes were appended at the bottom, making preprocessing repairs look like they happened after inference. Lifecycle failures were also hidden because `run_failed` events were emitted as `node="__run__"` and the renderer skipped `__*` nodes.
+
+**Changes (`src/bt5151_credit_risk/ui_trace.py`, `tests/test_ui_trace.py`):**
+1. Rebuilt the pipeline rail as an execution timeline first: actual trace events are rendered in emitted order, so retry/repair nodes appear beside the stage that triggered them.
+2. Replaced the stale coarse stage skeleton with the current main graph path and removed obsolete pending nodes such as `preprocess`, `feature-engineering`, and `recommend-action`.
+3. Kept conditional repair nodes out of the pending skeleton; they appear only when the trace actually emits them, or as the immediate next pending step after a failed conditional route.
+4. Normalized lifecycle events with `node="__run__"` into visible cards (`run-complete`, `run-failed`, `cache-saved`) so terminal failures are no longer hidden from the sidebar.
+5. Increased pipeline card height, padding, width, and connector length so each stage reads as a real block instead of a flat strip.
+6. Added regression tests for retry-loop ordering and terminal `run_failed` visibility.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py tests/test_ui_trace.py -q` → 40 passed; `PYTHONPATH=src .venv/bin/python3 -m pytest tests/ -q` → 177 passed. Browser QA on port 7862 confirmed the sidebar order now shows `validate-preprocessing-output` failure → `repair-preprocessing-code` → second inspect/execute/validate attempt → `generate-feature-engineering-code`.
+
+**Must remain true:**
+- Conditional retry nodes must be rendered from actual trace order, not appended after the canonical pipeline.
+- `run_failed` lifecycle events must be visible in the Developer Trace pipeline rail.
+- Obsolete coarse nodes must not reappear unless the graph emits those exact nodes again.
+
+## 2026-04-17 — Developer Trace sticky pipeline with normal log page scroll
+
+**Context:** Tab 3 should let users keep the pipeline progress visible while reading a long live/historical log, without putting the log into an inner scroll panel.
+
+**Changes (`app.py`, `tests/test_app.py`):**
+1. Moved custom Gradio CSS into `_app_css()` so layout contracts are testable.
+2. Changed Developer Trace sticky behavior from the inner `#trace-pipeline` HTML component to the whole `#trace-left-col` wrapper. This keeps the pipeline/sidebar visible while the right log continues to use normal document scroll.
+3. Root-cause fix from browser QA: Gradio's outer `.gradio-container` had `overflow: hidden`, which blocks CSS sticky even when the sidebar computes as `position: sticky`. The app CSS now overrides that container to `overflow: visible`.
+4. Constrained the left pipeline rail with `max-height: calc(100dvh - 112px)` and `overflow-y: auto`. The pipeline itself can scroll when it is taller than the viewport; the log remains normal page content.
+5. Follow-up browser QA found a second Gradio layout bug: the separate `gr.Markdown("#### Pipeline")` heading and `gr.HTML(elem_id="trace-pipeline")` body were laid out side-by-side inside the sticky column, then clipped by `overflow-x: hidden`, making the sidebar look empty. The title and dynamic pipeline body are now wrapped into one `gr.HTML` via `_wrap_pipeline_html()`.
+6. Added CSS guards so `#trace-log` and right-column wrappers stay `overflow: visible`; no `max-height` or `overflow-y: auto` is introduced for the log.
+7. Added regression tests that assert the left pipeline column is sticky, the log remains normal page content, and the pipeline title/body stay in one HTML component.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py -q` → 27 passed. Browser QA on port 7862 confirmed that after scrolling to `scrollY=1300`, `#trace-left-col` stays at `top=88px`; `#trace-log` remains `overflow=visible` and `max-height=none`; `.trace-pipeline-body` sits inside the left rail (`contentInside=true`).
+
+**Must remain true:**
+- Developer Trace log uses normal page scroll, not an inner scroll container.
+- Sticky behavior belongs to `#trace-left-col`, not only the inner pipeline HTML.
+- Mobile layouts disable sticky so the sidebar does not cover the log.
+
+## 2026-04-17 — Tab 1 inference UX + skill prompt overhaul
+
+**Context:** Three independent problems were addressed together: (1) `_run_explain_step` was discarding the `recommended_action` computed inside `explain_risk_node` and calling the weak `recommend-action.md` skill separately with minimal context; (2) `explain-risk.md` listed analysis bundle fields but gave no explicit instructions on how to chain each layer's evidence to the specific customer's prediction; (3) `recommend-action.md` was a 3-line placeholder with no schema, principles, or output contract.
+
+**Changes:**
+1. **`app.py` — architecture fix**: `_run_explain_step` now returns both `risk_explanation` and `recommended_action` from `explain_risk_node` (the node already pops the action from the single LLM response). Removed `_run_recommend_step` and its call in `cb_predict`. Saves 5-10s per inference request by eliminating a redundant LLM call.
+2. **`app.py` — PDP position chart**: New `_pdp_position_fig()` builder renders per-class PDP curves for the top SHAP features with a vertical marker at the customer's actual feature value. Falls back to a percentile bar chart when full curve data is absent. Added `pdp_position_plot` component to Tab 1.
+3. **`app.py` — casebook comparison chart**: New `_casebook_comparison_fig()` builder renders a side-by-side SHAP waterfall comparing this customer to the nearest casebook archetype (looked up from `state.local_xai_cases` by `row_index`). Added `casebook_comparison_plot` component to Tab 1.
+4. **`app.py` — `_build_action_md`**: Now surfaces the `urgency` field from the new recommended_action schema.
+5. **`app.py` — `cb_predict` yield tuples**: Extended from 6 to 8 items (added `pdp_position_plot`, `casebook_comparison_plot`). Removed step 5 (recommend LLM call); step 5 is now chart rendering. Progress bar recalibrated for ~20-25s total.
+6. **`skills/recommend-action.md`**: Complete rewrite — full decision matrix (predicted class × caution level × casebook signal), output schema with `action`, `urgency`, `rationale`, `key_evidence`, `monitoring_conditions`, `information_gaps`. Explicit evidence-first posture; rationale must cite named fields with actual values.
+7. **`skills/explain-risk.md`**: Added "How to use the analysis bundle for THIS customer" section with layer-by-layer chain-of-evidence instructions. Added `bundle_link` field to `key_drivers` schema. Added `curve_steepness` field to `pdp_context`. Added `customer_evidence` and `customer_relevance` fields to `hypothesis_validation`. Strengthened `recommended_action.rationale` rule to require at least one specific cited value.
+
+**Tradeoffs:**
+- The embedded `recommended_action` from `explain-risk.md` has full context (bundle, casebook, PDP, hypothesis chain). The standalone `recommend-action.md` still exists as a fallback skill but is no longer called during Tab 1 inference.
+- PDP position chart requires `global_xai_results.pdp` in state — will render the fallback percentile bar chart when PDP was not computed (ALE-only gating).
+
+**Must remain true:**
+- `_run_explain_step` must return a 2-tuple `(risk_explanation, recommended_action)`.
+- `cb_predict` must yield 8-item tuples; the outputs list must have the same 8 components in the same order.
+- `recommend-action.md` decision matrix must be the floor, not the ceiling — evidence can elevate the action above the matrix default.
+- Never fabricate SHAP values, PDP positions, or similarity scores in either skill prompt.
+
+## 2026-04-17 — Tab 2 staged evidence loading to avoid Gradio payload stalls
+
+**Context:** After converting Tab 2 plots to static images, the browser could still freeze when clicking the evidence refresh button after an app restart. The server-side callback completed, but one callback still returned metrics, confusion matrix, SHAP, PDP/ALE, casebook, dependence, and hypothesis markdown together. On slower local browsers this could stall while Gradio hydrated several output components from one response.
+
+**Changes (`app.py`, `tests/test_app.py`):**
+1. Kept a single top-right `Load / Refresh Evidence` button for Tab 2. One user action now starts the staged evidence refresh; there is no separate advanced-chart button for graders to understand.
+2. Split the backend work into sequential callbacks: summary first, then `cb_model_shap_chart()` → `cb_model_pdp_ale_charts()` → `cb_model_dependence_chart()`. The UI chains them with `.then(...)`, so one click still works but the payload arrives as smaller responses instead of one large multi-chart response.
+3. Added per-run chart caching for the individual chart callbacks and cleared it when the pipeline cache is invalidated.
+4. Updated app tests for generator-style Business View callbacks and added regression coverage that each heavy chart can load independently.
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py -q` → 25 passed.
+- Real-cache timing check: summary 4.27s including first cache load, SHAP 0.41s, PDP/ALE 1.45s, dependence 0.54s.
+
+**Must remain true:**
+- Tab 2 must not use `demo.load()` or `tab.select()` for model evidence refresh.
+- Summary and advanced charts must remain staged backend callbacks behind one visible button.
+- Advanced charts should stay sequentially chained or individually callable, not merged back into one large multi-output response.
+
+## 2026-04-16 — Fix FE deferred categorical encoding failures
+
+**Root cause:** `generate_feature_engineering_code()` and `repair_feature_engineering_code()` did not receive `deferred_categorical_columns` from state. The LLM had to infer which columns were deferred by inspecting object-dtype in the 5-row train sample — it consistently generated interaction features but skipped encoding Occupation/Payment_of_Min_Amount/Payment_Behaviour. All 3 repair attempts hit the same validation error (`[train_fully_numeric] non-numeric/non-bool columns`) because the repair prompt named the error but not the specific columns or the exact encoding contract.
+
+**Changes:**
+1. `feature_engineering.py`: Added `deferred_categorical_columns: dict | None = None` parameter to both `generate_feature_engineering_code()` and `repair_feature_engineering_code()`. When non-empty, included in LLM payload as `deferred_categorical_columns`.
+2. `graph.py`: `generate_feature_engineering_code_node` and `repair_feature_engineering_code_node` now pass `state.deferred_categorical_columns`. Generate node also logs the deferred columns before calling the LLM.
+3. `skills/generate-feature-engineering-code.md`: Added "MANDATORY: Encode deferred categorical columns" section before Technical guardrails. Provides the cardinality-based encoding table and frequency-encode code pattern explicitly.
+4. `skills/repair-feature-engineering-code.md`: Added "MANDATORY: Handle deferred categorical columns first" section before Reasoning steps. Provides cardinality rules, frequency encoding pattern, and assert pattern for both views.
+
+**Must remain true:**
+- `deferred_categorical_columns` must be passed to both generate and repair (not just one)
+- Encoding is view-appropriate: one-hot for linear, frequency for tree at medium cardinality
+- FE function must assert no object-dtype columns before writing each view's CSV
+
+## 2026-04-16 — Fix Tab 2 / Tab 3 frozen in Gradio 6.7+ (lazy tab loading)
+
+**Root cause:** Gradio 6.7 introduced lazy loading of inactive tab components. `demo.load()` callbacks targeting components inside inactive tabs (Tab 2, Tab 3) fire on page load but the outputs cannot be applied to lazily-loaded components — creating permanent loading spinners that block the tabs from becoming interactive. Additionally, `gr.Timer` was placed inside `with gr.Tab("Developer Trace"):`, making it tab-scoped: the timer only ticked when Tab 3 was visible, accumulating a backlog of events that all fired at once when the tab was clicked, freezing the UI.
+
+**Changes (`app.py`):**
+1. Removed `demo.load(cb_model_overview, ...)` from inside Tab 2. Replaced with `tab_evidence.select(cb_model_overview, ...)` — fires when Tab 2 is first selected, not on global page load. Tab is captured as `with gr.Tab("Model Evidence") as tab_evidence:`.
+2. Removed `demo.load(cb_poll_trace, ...)` from inside Tab 3 (no longer needed; timer handles polling).
+3. Moved `gr.Timer(value=5)` outside all `gr.Tab()` contexts to the Blocks level. Added `trigger_mode="always_last"` (discards queued ticks, only processes most recent) and `concurrency_limit=1` (prevents parallel executions) to `timer.tick()`.
+
+**Verification:** App restarted at PID 493363, HTTP 200. `/cb_poll_trace_1` duplicate endpoint gone (was two registrations; now correctly one). `cb_model_overview` API returns charts in ~0.1s. 21 app tests pass.
+
+**Must remain true:**
+- `gr.Timer` must be at Blocks level, never inside `gr.Tab`
+- Tab-specific initial loads use `tab.select()`, not `demo.load()`
+- `trigger_mode="always_last"` must stay on the timer tick to prevent queue buildup during long idle periods
+
+## 2026-04-16 — EDA MI now includes label-encoded categoricals
+
+**Context:** The programmatic EDA computed mutual information only on numeric columns, so ordinal-encoded categoricals (Credit_Mix, Month, Payment_of_Min_Amount) were invisible to the MI ranking. Credit_Mix is the dominant SHAP feature (0.5374 mean |SHAP|) but never appeared in the EDA discriminative features list, causing the hypothesis generation node to form predictions without knowing the top signal exists.
+
+**Changes (`src/bt5151_credit_risk/eda.py`):**
+1. `_compute_discriminative_features`: now accepts `categorical_cols` parameter. Each categorical is label-encoded and included alongside numerics in a single MI computation. Output rows tagged with `column_type: "numeric"` or `"categorical"`.
+2. `_compute_class_separability`: now accepts `categorical_cols`; adds `categorical_class_modes` section with class-conditional top-3 value distributions per categorical column.
+3. `_compute_categorical_association` (new): computes Cramér's V + chi-squared for each categorical vs target. Added as `categorical_association` section in the EDA report.
+4. Added `scipy.stats.chi2_contingency` import.
+
+**Why:** LLM hypothesis generation reads the EDA report. If Credit_Mix (the dataset's near-proxy for Credit_Score) is absent from the MI ranking, tested predictions will be wrong before any model runs. Fix ensures the unified MI ranking shows all features the model will actually see.
+
+**Tradeoff:** Label encoding for MI is order-agnostic — MI doesn't care about numeric assignment, only mutual information. Cramér's V complements this with a scale-free measure that doesn't require encoding. No ordinal assumptions are baked into the MI step.
+
+**Verification:** 169 tests pass. Smoke-tested on mini dataset: Credit_Mix appears in `top_discriminative_features` with `column_type: "categorical"`.
+
+**Must remain true:**
+- `top_discriminative_features` must include both numeric and categorical columns in a unified ranking
+- Each result must have a `column_type` field so the LLM knows which columns needed encoding
+- `categorical_association` section must exist in the EDA report
+
+## 2026-04-16 — Gradio Model Evidence callback handles nested hypothesis validation
+
+**Context:** In the real cached pipeline state, `training_diagnostics["hypothesis_validation"]` is a dict with `tested` and `supported` sections, not a flat list. The Gradio `cb_model_overview()` callback assumed list indexing and crashed with `KeyError: 0`, which made Tab 2 hang/fail and destabilized the tabbed UI experience.
+
+**Changes:**
+1. **Normalize hypothesis-validation shape in the UI callback** (`app.py`): `cb_model_overview()` now accepts either shape:
+   - flat list of rows
+   - nested dict with `tested` / `supported`
+   The nested form is flattened into a markdown table with a `tier` column so the UI can render real cached pipeline outputs without crashing.
+2. **Regression coverage for the real cache shape** (`tests/test_app.py`): Added a focused test proving the callback renders a nested `hypothesis_validation` dict and includes both `tested` and `supported` rows in the output markdown.
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py -q`
+- Direct callback check against the real cache via `cb_model_overview()` completed successfully and returned the expected tuple/markdown output.
+
+**Must remain true:**
+- `cb_model_overview()` must tolerate both flat-list and nested-dict `hypothesis_validation` payloads
+- UI rendering code must not assume test fixtures match the exact persisted cache shape
+
+## 2026-04-16 — Contract hardening: cross-field invariants, feature lineage, shortcut audit
+
+**Context:** Run 012 and 013 shipped but the pipeline had three structural blind spots: (a) preprocessing only checked one-sided role invariants — a column tagged `numeric_continuous` that stayed string would pass the validator; (b) feature engineering had no way to prove what each engineered column actually computed — the FE report was a human-readable list of formula strings, not a replayable manifest; (c) XAI outputs like `Month` top-ranked by SHAP and `Credit_Mix` dominating the importance plot were flagged manually in discussion, with no systematic detection + ablation in-run. Plan: [docs/plans/2026-04-16-contract-hardening-lineage-shortcut-audit.md](../plans/2026-04-16-contract-hardening-lineage-shortcut-audit.md).
+
+**Changes:**
+1. **Preprocessing numeric dtype gate + cross-field invariants** ([preprocess.py](../../src/bt5151_credit_risk/preprocess.py), [tests/test_preprocess.py](../../tests/test_preprocess.py)): combined the one-sided `if numeric and ...` branches into a single block that fails *both* ways — if a role-declared `numeric_count`/`numeric_continuous` column is still object dtype, it now records `not_numeric_dtype`; non-negative, NaN, and inf checks live under the numeric branch. Added `validate_semantic_invariants()`: Age ∈ [18, 100] with output cardinality ≥30% of raw (gated to frames ≥100 rows to avoid tripping on toy fixtures), Credit_History_Age ∈ [0, 1000] months with ≤ (Age−18)·12·1.1, detection of non-multiple-of-12 values indicating month-component was dropped, missing-sentinel mutual exclusivity, and Not-Specified-alongside-_missing duplicate encoding. Return dict now includes `cross_field_violations`.
+2. **Preprocessing contract report persisted** ([preprocess.py](../../src/bt5151_credit_risk/preprocess.py), [graph.py](../../src/bt5151_credit_risk/graph.py)): `validate_preprocessing_output()` writes `preprocessing_contract_report.json` to the workspace with merged role+invariant violations. Repair escalation signature now includes invariant violations so the capability-ceiling check catches repeated semantic failures.
+3. **Feature lineage manifest** ([skills/generate-feature-engineering-code.md](../../skills/generate-feature-engineering-code.md), [skills/repair-feature-engineering-code.md](../../skills/repair-feature-engineering-code.md), [feature_engineering.py](../../src/bt5151_credit_risk/feature_engineering.py), [tests/test_feature_engineering_validation.py](../../tests/test_feature_engineering_validation.py)): FE codegen prompt now requires `feature_lineage.json` with structured entries (`operation`, `input_stage`, `inputs`, `drop_reason`) drawn from enumerated vocabularies — no free-form formula strings. Added `validate_feature_lineage()` with replay: samples 20 rows, recomputes ratio/product/sum/difference/log1p from declared raw parents, asserts `|expected − actual| ≤ max(1e-4, 1e-4·|expected|)`. Rules enforced: `lineage_artifact_present`, schema, operation/input_stage/drop_reason enums, `ratios_use_raw_parents` (arithmetic ops must cite `pre_fe_raw_numeric`), `lineage_coverage_complete` (every engineered column accounted for), `top_mi_drop_requires_justification` (top-5 MI can only be dropped by `leakage` or `deterministic_duplicate`), `lineage_replay_matches`. `feature_contract_report.json` persisted to workspace. Covers Phases 2 + 3 of the plan.
+4. **Shortcut-feature audit node** ([shortcut_audit.py](../../src/bt5151_credit_risk/shortcut_audit.py), [graph.py](../../src/bt5151_credit_risk/graph.py), [state.py](../../src/bt5151_credit_risk/state.py), [skills/interpret-global-xai.md](../../skills/interpret-global-xai.md), [tests/test_shortcut_audit.py](../../tests/test_shortcut_audit.py)): new `shortcut-feature-audit` node sits between `local-xai` and `interpret-global-xai`. Detects suspects via three signals — SHAP/PFI rank divergence (SHAP ≤5 but PFI >10), top-10 SHAP share dominance (>20%), and calendar-pattern names (`Month`, `Day*`, `Year`, `Index`, `Week`, `Quarter`). Ablates up to 2 suspects by zero-out (median for numeric, 0 for non-numeric) in the test view — no retrain — and computes ΔmacroF1. Verdicts: `|Δ| < 0.005 → weak_signal`, `Δ < −0.02 → real_signal`, else `inconclusive`. `shortcut_audit.json` persisted; `interpret-global-xai` now receives the audit and instructs the LLM to treat weak-signal features as untrusted in hypothesis validation.
+5. **Test fixtures updated** ([tests/test_feature_engineering.py](../../tests/test_feature_engineering.py), [tests/test_graph.py](../../tests/test_graph.py)): existing "passing" FE fixtures and the end-to-end compiled-graph fake now emit a minimal `feature_lineage.json` so they satisfy the new contract. 149/149 tests pass (notebook smoke excluded as before).
+
+**Tradeoffs:**
+- Lineage enum accepted `one_hot` and `frequency_encode` beyond the strict plan enum because real FE outputs one-hot expansions, and rejecting them would cause false repair loops. `bin` and `interaction` without a declared operator are in the enum but skipped by replay (the operator isn't deterministically replayable without extra schema).
+- Shortcut audit ablates by zero-out rather than retrain to stay within the plan's cost cap; verdict thresholds are absolute (0.005 / 0.02) rather than dataset-adaptive — future work if false-verdict rate bites.
+- Age cardinality check is gated to ≥100 rows; below that, toy frames where `Age.nunique()` is naturally small would generate spurious violations.
+
+**Must remain true:**
+- `preprocessing_contract_report.json` and `feature_contract_report.json` must be persisted every run, regardless of pass/fail.
+- Every engineered column must appear in `feature_lineage.json` as derived, passthrough, or one-hot expansion of a declared parent — no unaccounted columns.
+- Ratios/products/sums/differences/interactions must declare `input_stage=pre_fe_raw_numeric`; log-transformed parents fail `ratios_use_raw_parents`.
+- Top-5 MI raw features in `dropped_features` must carry `drop_reason ∈ {leakage, deterministic_duplicate}`; any other reason fails validation.
+- `shortcut-feature-audit` runs before `interpret-global-xai` and its output is passed through the interpretation prompt so weak-signal features are de-emphasized in explanations.
+- Replay sample uses `np.random.RandomState(42)` so lineage violations are reproducible across runs on the same data.
+
+## 2026-04-16 — Three-tab UI: failed-run status, cold-start layout, trace poll efficiency
+
+**Context:** Three bugs found in the live demo after shipping the three-tab UI.
+
+**Changes:**
+1. **Bug (High): Failed runs marked completed** ([run_stage.py](../../run_stage.py)): `run_stage()` catches all pipeline exceptions internally and returns `None`. The outer `main()` had a `try/except` that would call `mark_run_failed`, but it only fires for exceptions that *escape* `run_stage()` — which never happens. Added an explicit `result is None` check after the call: if `None`, call `mark_run_failed` and return early, never reaching `mark_run_completed`. Tradeoff: `run_stage()` still swallows the exception for logging purposes; `main()` now correctly reflects that outcome in `active_run.json`.
+2. **Bug (High): Cold-start layout frozen** ([app.py](../../app.py)): `has_cache = state is not None` was captured once at `build_app()` time. Tabs 1 and 2 were rendered inside `if not has_cache / else` branches, so if the app started cold, no interactive components were created, and later cache reload had nothing to populate. Fix: removed `has_cache` branching entirely — all components always rendered. All callbacks (`cb_load_customer`, `cb_predict`, `cb_model_overview`) already handle `state is None` gracefully by returning placeholder data.
+3. **Bug (Medium): Full log re-parse every poll** ([app.py](../../app.py)): `cb_developer_trace()` called `parse_stage_log()` on every 5-second tick regardless of whether the log had grown. Added module-level `_last_trace_log_path`, `_last_trace_log_size`, `_last_trace_md`. On each tick, compares `path.stat().st_size` to last-seen size; if unchanged, returns cached markdown immediately. Only re-parses when the file has actually grown.
+
+**Must remain true:**
+- `mark_run_completed` must never be called when `run_stage()` returned `None`
+- `active_run.json` status must reflect actual pipeline outcome (completed vs failed)
+- Tab 1 and Tab 2 components must be created unconditionally at app startup
+- Developer Trace re-parse is gated on file growth, not wall-clock time
+
+## 2026-04-16 — MI-first tiebreaker for correlated feature drops (validator + prompt)
+
+**Context:** Run 013 dropped `Monthly_Inhand_Salary` (MI=0.5187, #2 ranked feature) because its correlation with `Annual_Income` exceeded |r|>0.95 after imputation. The existing FE skill prompt said "keep the one with higher variance" — the wrong criterion. Variance measures spread, not class-separating signal. MI directly measures class-separating signal, which is what matters for feature selection.
+
+**Changes:**
+1. **Skill prompt rule rewrite** ([skills/generate-feature-engineering-code.md](../../skills/generate-feature-engineering-code.md)): Rule 2 changed from "keep the higher-variance feature" to "keep the higher-MI feature." Added absolute protection: "NEVER drop a top-5 MI raw feature in favor of a lower-MI proxy unless the pair is a deterministic duplicate (identical values) or a leakage feature (derived from target)." The correlation drop rule now only applies when both features have MI rank > 5.
+2. **Programmatic validator** ([src/bt5151_credit_risk/feature_engineering.py](../../src/bt5151_credit_risk/feature_engineering.py)): Added `check_top_mi_not_dropped()` inside `validate_feature_engineering_output()`. Checks that each top-5 MI feature is present in the output (as itself or an explicit derived form like `_log`, `_bin`). Generates a repair-ready error message naming the rule and restoration path.
+3. **Graph wiring** ([src/bt5151_credit_risk/graph.py](../../src/bt5151_credit_risk/graph.py)): `validate_feature_engineering_node()` now extracts top-5 MI features from `state.eda_report["top_discriminative_features"]` and passes them to the validator via the new `top_mi_features` parameter.
+
+**Must remain true:**
+- When |r| > 0.95, higher-MI feature wins — never higher-variance
+- Top-5 MI raw features are protected from the correlation drop rule unless the pair is a deterministic duplicate or leakage feature
+- Validator error messages must be repair-ready (name the rule and restoration path, not just "feature missing")
+
 ## 2026-04-16 — Three-tab Gradio UI with live developer trace
 
 **Context:** The previous app was a single-tab prediction demo with no visibility into the training pipeline or model evidence. This change ships a full three-tab UI: Tab 1 is a business-first prediction view, Tab 2 exposes model evidence (confusion matrix, per-class metrics, global SHAP, hypothesis validation table), and Tab 3 is a live developer trace that polls the active run log while training and falls back to the cached run log when idle.
@@ -490,3 +838,45 @@
 - FE prompt examples and runtime validator must use the same dtype contract
 - Preprocessing timeout changes are a guardrail tuning knob, not a substitute for fixing slow generated code
 - Logs and analysis bundles are now versionable artifacts; if they create repo bloat later, use a more selective policy instead of reintroducing blanket ignores
+
+## 2026-04-16 — Deterministic selection and structured Developer Trace artifacts
+
+**Context:** We wanted to borrow the right lessons from `plexe-main` without importing its heavier search/journal architecture. The two highest-value gaps were still open: the final selected model could still be nudged by the LLM, and the Gradio Developer Trace tab was still parsing prose logs instead of binding to a machine-readable run artifact.
+
+**Changes:**
+
+1. **Deterministic final model selection** (`evaluate.py`, `graph.py`, `tests/test_evaluate.py`, `tests/test_graph.py`): `choose_best_model()` is now the sole authority for `selected_model_name`, using held-out `macro_f1` and `weighted_f1`. The `reason-model-selection` skill is still called, but only to explain the metric winner and attach hypothesis-validation context. Any LLM-proposed alternate `model_name` is logged as advisory and ignored.
+
+2. **Structured trace-event artifact** (`trace_events.py`, `run_stage.py`, `run_status.py`, `cache.py`, `state.py`, `tests/test_run_status.py`, `tests/test_trace_events.py`): Added `trace_events_<run_id>.jsonl` as a first-class run artifact. `run_stage.py` now emits run lifecycle events plus node-complete events, `active_run.json` now records `trace_path`, and cache provenance now preserves `cache_trace_path` alongside the existing log and bundle paths.
+
+3. **Developer Trace routing prefers machine-readable provenance** (`ui_trace.py`, `app.py`, `tests/test_ui_trace.py`, `tests/test_app.py`): The Gradio Developer Trace tab now prefers `active_run.trace_path` for live/failed/completed active runs, then `state.cache_trace_path` for cached runs, and only falls back to raw stage logs when no trace artifact exists. The UI parser now renders both structured trace JSONL and raw logs into the same card-based Markdown view.
+
+4. **Failure-path hardening for trace/provenance** (`run_status.py`, `run_stage.py`): `mark_run_completed()` / `mark_run_failed()` now guard against stale `run_id` writes, and successful pipeline runs no longer remain stuck in `running` if optional post-run persistence steps like cache save or `cache_saved` trace append fail.
+
+**Verification:** Targeted slices passed during implementation:
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_evaluate.py tests/test_graph.py -q`
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_run_status.py tests/test_trace_events.py -q`
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_ui_trace.py tests/test_app.py -q`
+
+**Must remain true:**
+- The LLM may justify the winner, but it must never override `selected_model_name`
+- `trace_events_<run_id>.jsonl` must remain bound to the same `run_id` as the stage log, analysis bundle, and cached model provenance
+- `active_run.json` remains single-writer state owned by `run_stage.py`
+- Developer Trace must prefer structured trace artifacts first and use raw logs only as fallback evidence
+
+## 2026-04-17 — Model Evidence toolbar cleanup and sticky Developer Trace sidebar
+
+**Context:** After the Tab 2 rendering stabilization, the remaining UX rough edges were layout-related: the evidence refresh button was unnecessarily full-width, and Developer Trace needed a classic sticky-left/sidebar + normal-page-scroll behavior instead of feeling like a nested panel.
+
+**Changes:**
+
+1. **Right-aligned Evidence toolbar** (`app.py`, `tests/test_app.py`): Reworked the top of Tab 2 into a small toolbar row with the explanatory copy on the left and a narrow `Load / Refresh Evidence` button on the right. Added stable `elem_id` hooks so the layout is intentional rather than relying on implicit Gradio sizing.
+
+2. **Sticky left pipeline panel in Developer Trace** (`app.py`, `tests/test_app.py`): Added `elem_id` hooks for the trace layout and applied CSS so the left pipeline column stays visible with `position: sticky` while the right log uses the normal document scroll. This preserves the requested “classic sticky sidebar” UX and avoids introducing an inner scroll region.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_app.py -q`
+
+**Must remain true:**
+- The evidence refresh control stays narrow and right-aligned on desktop layouts
+- Developer Trace uses normal page scroll; the log should not become an inner scroll container
+- The sticky pipeline behavior relies on explicit `elem_id` hooks, so future layout work should preserve those ids or update the CSS/tests together

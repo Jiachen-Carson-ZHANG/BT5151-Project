@@ -6,9 +6,6 @@
 __pycache__/
 *.pyc
 .claude/
-AGENTS.md
-AGENT.md
-docs/
 
 train.csv
 credit_score_cleaned.csv
@@ -19,6 +16,15 @@ generated_preprocessing_runs/
 feature_engineering_runs/
 /logs/
 /analysis_bundle_*.json
+BT5151_GroupProject_Source/
+BT5151_GroupProject_Source.zip
+plexe-main/
+lab/cache/pipeline_state_*.pkl
+.graphify-state/
+.graphify_*.json
+graphify-out/cache/
+graphify-out/.semantic_update_needed
+graphify-out/.needs_clean_rebuild
 
 # Local tool configs
 .codex
