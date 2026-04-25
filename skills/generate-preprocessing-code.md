@@ -31,6 +31,25 @@ Treat the preprocessed feature frame as a **compact canonical base table**. If t
 
 If your output violates any of these, the validator returns structured findings and the repair loop will re-invoke you with the exact violation + likely cause.
 
+## Deterministic cleaning primitive contract
+
+The payload may include `allowed_cleaning_primitives`, and each transform may optionally declare `primitive`, `primitive_params`, and `semantic_subtype`.
+
+- `semantic_role` remains the primary contract. Do not invent a new role taxonomy.
+- Treat `primitive` as an approved implementation hint from the runtime library. Prefer its deterministic behavior over fresh ad hoc regex or parsing logic.
+- `primitive_params` provides the concrete bounds, tokens, delimiters, or grouping parameters you should honor in code.
+- `semantic_subtype` is descriptive only; use it to sharpen reasoning, not to override the declared `semantic_role`.
+
+Map explicit primitives to these canonical behaviors:
+
+- `parse_dirty_numeric` -> strip non-numeric artifacts, then `pd.to_numeric(..., errors='coerce')`
+- `parse_age_series` -> extract the first numeric age token, then coerce
+- `parse_duration_months` -> parse `"X Years and Y Months"` style strings into total months
+- `missing_string_mask` -> normalize placeholder tokens to missing before further cleaning
+- `multi_hot_membership` -> use presence-based multi-hot encoding with deduped, prefixed dummy columns
+- `fill_numeric_by_group_then_global` -> fill from group medians first, then global fallback
+- `cap_credit_history_by_adulthood` -> bound credit-history months using applicant age after both are numeric
+
 ## Step-by-step workflow
 
 Follow these steps **in this exact order**. Each step corresponds to a block of code in your output. Do not skip any step.
@@ -59,14 +78,15 @@ Follow these steps **in this exact order**. Each step corresponds to a block of 
 ### Step 4: Clean and impute each kept column
 For every column with `action: "keep"`, apply in this order:
 0. **Replace garbage tokens with NaN** if the spec sets `garbage_tokens`. Do this FIRST, before numeric coercion or any other cleaning: `df['col'] = df['col'].replace(spec['garbage_tokens'], np.nan)`. Placeholder strings must become NaN so downstream imputation (group_median, fallback_formula) can fill them properly. If you skip this, `to_numeric(errors='coerce')` will still produce NaN, but group imputation will have been computed on a polluted distribution.
-1. **Strip non-numeric artifacts** if the spec's `cleaning` says so (e.g. `"strip non-numeric characters"`): `df['col'] = df['col'].astype(str).str.replace(r'[^0-9.\-]', '', regex=True)`. This handles currency symbols, thousands separators, stray underscores, unit labels — anything that breaks bare `to_numeric`.
-2. **Coerce to numeric** if the spec says any form of "convert to int/float/numeric": `df['col'] = pd.to_numeric(df['col'], errors='coerce')`. This is safer than `.replace().astype()` because real-world data has unpredictable string artifacts.
-3. **Parse structured strings** if the spec says "extract" or "convert to months/days": use `str.extract` with proper handling. If using multiple capture groups, assign to separate intermediate columns first — `str.extract` with 2+ groups returns a DataFrame, not a Series.
-4. **Outlier handling — two strategies per spec's `cleaning` string:**
+1. **Apply any declared deterministic primitive first.** If `spec['primitive']` is set, implement that exact primitive before generic heuristics. For example, `parse_age_series` should extract the first numeric token, `parse_duration_months` should produce total months, and `missing_string_mask` should normalize explicit placeholder strings to missing. Do not ignore an explicit primitive in favor of a looser custom parser.
+2. **Strip non-numeric artifacts** if the spec's `cleaning` says so or the primitive implies it (e.g. `"strip non-numeric characters"` / `parse_dirty_numeric`): `df['col'] = df['col'].astype(str).str.replace(r'[^0-9.\-]', '', regex=True)`. This handles currency symbols, thousands separators, stray underscores, unit labels — anything that breaks bare `to_numeric`.
+3. **Coerce to numeric** if the spec says any form of "convert to int/float/numeric" or the primitive implies numeric output: `df['col'] = pd.to_numeric(df['col'], errors='coerce')`. This is safer than `.replace().astype()` because real-world data has unpredictable string artifacts.
+4. **Parse structured strings** if the spec says "extract" or "convert to months/days", or if the primitive implies it: use `str.extract` with proper handling. If using multiple capture groups, assign to separate intermediate columns first — `str.extract` with 2+ groups returns a DataFrame, not a Series.
+5. **Outlier handling — two strategies per spec's `cleaning` string:**
    - **Hard clip** when `cleaning` says "clip to [low, high]": `df['col'] = df['col'].clip(lower=low, upper=high)`.
    - **Mark out-of-range as NaN** when `cleaning` says "mark values outside [low, high] as NaN" or similar. Pattern: `df.loc[(df['col'] < low) | (df['col'] > high), 'col'] = np.nan`. This leaves the refill to step 4 — use when group_impute_by is set so peer records can restore the value instead of flattening it.
    - If the spec gives no bound but the profile shows a huge tail (`max` far above `p99` or `min` far below `p1`), fall back to percentile-based two-sided clipping.
-5. **Impute missing values** according to the spec's `imputation` strategy:
+6. **Impute missing values** according to the spec's `imputation` strategy:
    - `median` / `mode`: global statistic, `df['col'] = df['col'].fillna(df['col'].median())` or `.mode().iloc[0]`.
    - `group_median` / `group_mode`: read `group_impute_by` from the spec. It may be a single column name or a list of column names. Each grouping column may live in `raw_df` (for dropped group_identifiers) **or** in `df` (for kept feature columns); resolve them **independently** per column, and assume `raw_df` is already row-aligned with `df` (target-drop kept them in sync). Each resolved grouper must be passed with `df.index` so pandas aligns on position, not on its native index:
      ```python
@@ -124,6 +144,7 @@ For each column that needs encoding per the spec:
   dummies.columns = [f'{ORIGINAL_COL}_{c}' for c in dummies.columns]
   df = pd.concat([df.drop(columns=[ORIGINAL_COL]), dummies], axis=1)
   ```
+  This is also the required pattern when `spec['primitive'] == 'multi_hot_membership'`.
   Do NOT pass raw combined strings to `pd.get_dummies` — that creates one dummy per unique combination (thousands of columns).
   Do NOT use `f'col_{c}'` — `col` is not a valid substitution; always use the actual column name string.
 - **One-hot**: `df = pd.get_dummies(df, columns=[...], drop_first=False)`

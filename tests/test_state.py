@@ -37,6 +37,7 @@ def test_state_has_expected_keys():
     assert state.column_transform_spec is None
     assert state.preprocessing_code is None
     assert state.preprocessing_codegen_metadata is None
+    assert state.preprocessing_codegen_snapshot_path is None
     assert state.preprocessing_code_review is None
     assert state.preprocessing_workspace is None
     assert state.preprocessing_artifacts is None
@@ -46,6 +47,8 @@ def test_state_has_expected_keys():
     assert state.preprocessing_validation_report is None
     assert state.preprocessing_attempt_count == 0
     assert state.feature_engineering_code is None
+    assert state.feature_engineering_codegen_metadata is None
+    assert state.feature_engineering_codegen_snapshot_path is None
     assert state.feature_engineering_code_review is None
     assert state.feature_engineering_execution_log is None
     assert state.feature_engineering_validation_report is None
@@ -55,6 +58,7 @@ def test_state_has_expected_keys():
     assert state.eda_report is None
     assert state.learning_curves is None
     assert state.tuning_trial_history is None
+    assert state.tuning_artifact_path is None
     assert state.eda_hypotheses is None
     assert state.training_diagnostics is None
     assert state.train_group_values is None
@@ -83,14 +87,19 @@ def test_state_accepts_new_preprocessing_fields():
         run_id="20260415_131136",
         preprocessing_code={"code": "print('hello')"},
         preprocessing_codegen_metadata={"model": "gpt-4o-mini"},
+        preprocessing_codegen_snapshot_path="/tmp/codegen/preprocessing",
         preprocessing_code_review={"passed": True},
         preprocessing_workspace="/tmp/run-1",
         preprocessing_artifacts={"feature_frame": "feature_frame.csv"},
         preprocessing_execution_log={"stdout": "ok"},
         preprocessing_validation_report={"passed": True},
         preprocessing_attempt_count=2,
+        feature_engineering_codegen_metadata={"model": "o4-mini"},
+        feature_engineering_codegen_snapshot_path="/tmp/codegen/feature_engineering",
     )
 
     assert state.preprocessing_code == {"code": "print('hello')"}
     assert state.preprocessing_attempt_count == 2
     assert state.run_id == "20260415_131136"
+    assert state.preprocessing_codegen_snapshot_path == "/tmp/codegen/preprocessing"
+    assert state.feature_engineering_codegen_snapshot_path == "/tmp/codegen/feature_engineering"

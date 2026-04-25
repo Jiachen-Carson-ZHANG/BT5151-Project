@@ -15,7 +15,7 @@ These guide your reasoning. Understand the *why* so you can apply them to any da
 
 3. **Class struggle is predicted by overlap, not just size.** A minority class with well-separated feature distributions can be easy to classify. A majority class whose conditional means overlap with a neighbor will struggle regardless of support. Look at class-conditional means: when two classes share similar values across many features, predict which confusion pair will dominate and whether the confusion is symmetric or asymmetric.
 
-4. **Correlation structure predicts model advantage.** Highly correlated feature groups mean redundant signal that linear models waste capacity on. Tree-based models split on the best feature and ignore the rest. Many |r| > 0.8 pairs among top MI features → predict tree/boosted model advantage. Few correlations → linear models stay competitive.
+4. **Correlation structure predicts model advantage.** Highly correlated feature groups mean redundant signal that linear models waste capacity on. Tree-based models split on the best feature and ignore the rest. Many |r| > 0.8 pairs among top **model-eligible** MI features → predict tree/boosted model advantage. Few correlations → linear models stay competitive.
 
 5. **Ground every hypothesis in specific numbers.** Cite MI values, F-statistics, correlation coefficients, class sizes, and skewness values by name. "Annual_Income has the highest MI (0.18), 3× the next feature" is auditable. "Income seems important" is not.
 
@@ -25,11 +25,20 @@ These guide your reasoning. Understand the *why* so you can apply them to any da
   - `correlations.high_pairs` — feature pairs with |r| > 0.8
   - `class_separability.class_means` — per-class means for numeric features
   - `class_separability.anova_top_features` — ANOVA F-statistics
-  - `top_discriminative_features` — mutual information rankings
+  - `top_discriminative_features` — backward-compatible alias for **model-eligible** mutual information rankings
+  - `model_eligible_top_discriminative_features` — mutual information rankings after identifier/leakage filtering; use this for modeling hypotheses
+  - `raw_top_discriminative_features` — raw MI rankings before leakage filtering; use for audit only
+  - `leakage_alerts` — blocked or suspicious high-MI fields that should not drive modeling hypotheses
   - `skewness.highly_skewed` — features with |skew| > 2
   - `missing_patterns.mnar_suspects` — features where missingness correlates with target
   - `cardinality.high_cardinality` — categorical features with >20 unique values
 - `dataset_profile` — row count, column count, target distribution, missing counts
+
+## Modeling vs audit signals
+
+- **Use `model_eligible_top_discriminative_features` / `top_discriminative_features` for every modeling claim.** These are the features the downstream pipeline can actually train on.
+- **Do not build "model will use X" hypotheses from `raw_top_discriminative_features` when X appears in `leakage_alerts`.** If a raw top feature is an identifier, group key, or leakage-risk field, treat it as an audit finding, not a model opportunity.
+- **Leakage alerts are still informative.** You may mention them as audit observations ("Customer_ID has high raw MI but is blocked as a group key"), but they must not anchor model-selection, SHAP, or feature-engineering predictions.
 
 ## What to reason about
 

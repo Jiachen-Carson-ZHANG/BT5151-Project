@@ -56,6 +56,8 @@ Given the dataset-level policy, sample data, column profiles, and optional EDA i
 
 16. **Target rows with missing labels must be dropped, not imputed.** If the target column has any NaN after cleaning, the generator should drop those rows — never impute a label. This is enforced after target extraction in the codegen step; the spec simply needs to mark the target correctly.
 
+17. **Prefer additive primitive hints when the runtime exposes an approved cleaning library.** You may receive `allowed_cleaning_primitives`, which enumerates deterministic helpers already available to preprocessing codegen. When one fits the column semantics, declare it explicitly with `primitive` and `primitive_params` while still keeping the correct `semantic_role`. This extends the contract; it does not replace it.
+
 ## Semantic roles
 
 Assign exactly one `semantic_role` to every column. The role drives the invariant that the deterministic validator enforces on the post-preprocessing output.
@@ -100,6 +102,26 @@ For canonical preprocessing output, prefer these defaults unless the data clearl
 
 **When `representation_intent: "deferred"` is declared:** preprocessing must clean the column (garbage tokens replaced, imputation applied) but leave it as an object-dtype string column in the output frame. The FE node is responsible for producing numeric columns per view. Do not also set an `encoding` for a deferred column — the FE stage owns that decision.
 
+## Primitive hints
+
+When `allowed_cleaning_primitives` is present, treat it as the approved deterministic cleaning library for downstream preprocessing codegen.
+
+- Keep `semantic_role` on the existing 12-role taxonomy.
+- Use `primitive` only when one of the provided primitives is a direct semantic fit.
+- Use `primitive_params` for concrete bounds, token lists, delimiter choices, or group columns that make the primitive actionable.
+- `semantic_subtype` is optional. Use it only to sharpen meaning without inventing a new top-level role, for example `"currency_amount"`, `"duration_months"`, or `"human_age"`.
+- If no primitive applies, leave `primitive` and `primitive_params` null and describe the cleaning normally.
+
+Recommended mappings when the data supports them:
+
+- Dirty numeric strings with symbols / separators -> `parse_dirty_numeric`
+- Human age stored as mixed text -> `parse_age_series`
+- `"X Years and Y Months"` style durations -> `parse_duration_months`
+- Placeholder-string normalization -> `missing_string_mask`
+- Delimited multi-value membership sets -> `multi_hot_membership`
+- Entity-stable numeric imputation -> `fill_numeric_by_group_then_global`
+- Credit history months bounded by applicant age -> `cap_credit_history_by_adulthood`
+
 ## Considerations for each column
 
 - **Relevance**: identifier? group key? target? Feature?
@@ -108,11 +130,15 @@ For canonical preprocessing output, prefer these defaults unless the data clearl
 - **Structure**: single-value or delimited multi-value?
 - **Representation compactness**: ask whether this encoding keeps one concept as one feature when possible, or explodes it prematurely before feature engineering has a chance to reason about it.
 - **Missingness**: MNAR flag from EDA means missingness carries signal.
-- **Discriminative power**: prioritize features with high MI or ANOVA F.
+- **Discriminative power**: prioritize features with high **model-eligible** MI or ANOVA F. If `eda_insights.raw_top_discriminative_features` contains identifier-like or leakage-alert columns, treat those as audit warnings, not evidence that the raw field should survive preprocessing.
 
 ## Inputs
 
-- `columns`, `sample_rows`, `column_profiles`, `dataset_policy_spec`, optional `eda_insights`.
+- `columns`, `sample_rows`, `column_profiles`, `dataset_policy_spec`, `allowed_cleaning_primitives`, optional `eda_insights`.
+  - When present, `eda_insights.top_discriminative_features` is the backward-compatible alias for **model-eligible** MI rankings.
+  - `eda_insights.model_eligible_top_discriminative_features` is the authoritative list for modeling relevance.
+  - `eda_insights.raw_top_discriminative_features` and `eda_insights.leakage_alerts` are audit context only. Use them to justify drop/quarantine decisions or call out suspicious raw signal, but do not preserve an identifier/leakage field just because its raw MI is high.
+  - `allowed_cleaning_primitives` lists the approved deterministic runtime helpers. Prefer them whenever the column semantics match.
 
 ## Output format
 
@@ -125,6 +151,9 @@ Return **only** a raw JSON object (no markdown fences, no explanation text):
       "action": "keep" | "drop" | "quarantine",
       "semantic_role": "<one of the 12 roles>",
       "representation_intent": "<intent string or null>",
+      "primitive": "<allowed primitive name or null>",
+      "primitive_params": {"<param>": "<value>", ...} | null,
+      "semantic_subtype": "<optional subtype string or null>",
       "cleaning": "<specific instruction with concrete bounds, or null>",
       "imputation": "median" | "mode" | "group_median" | "group_mode" | "fallback_formula" | null,
       "group_impute_by": "<column name>" | ["<col1>", "<col2>", ...] | null,
@@ -152,16 +181,16 @@ Given columns `["Patient_ID", "Age", "Blood_Pressure", "Smoker", "Severity", "Sy
 ```json
 {
   "transforms": {
-    "Patient_ID": {"action": "drop", "semantic_role": "group_identifier", "representation_intent": null, "cleaning": null, "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
-    "Age": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "cleaning": "convert to int, mark values outside [0, 120] as NaN", "imputation": "group_median", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
-    "Blood_Pressure": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "cleaning": "strip whitespace, convert to float, clip to [40, 250]", "imputation": "group_median", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
-    "Diastolic_BP": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "cleaning": "convert to float, clip to [30, 150]", "imputation": "fallback_formula", "group_impute_by": null, "bucket_spec": null, "fallback_formula": "Blood_Pressure * 0.65", "ordinal_mapping": null, "encoding": null},
-    "Med_Dose_mg": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "cleaning": "convert to float, clip to [0, 500]", "imputation": "group_median", "group_impute_by": ["Age_Bucket", "Smoker"], "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
-    "Visit_Count": {"action": "keep", "semantic_role": "numeric_count", "representation_intent": "raw", "cleaning": "mark values < 0 as NaN, clip upper 100", "imputation": "group_median", "group_impute_by": "Severity_Bucket", "bucket_spec": {"source": "Severity_Score", "edges": [-1, 3, 6, 10], "labels": [0, 1, 2]}, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
-    "Smoker": {"action": "keep", "semantic_role": "binary_flag", "representation_intent": null, "cleaning": "map {'Yes':1,'No':0}", "imputation": "mode", "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "garbage_tokens": null, "encoding": null},
-    "Severity": {"action": "keep", "semantic_role": "ordered_categorical", "representation_intent": null, "cleaning": "replace placeholder tokens with NaN, then map", "imputation": "group_mode", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": {"Mild": 0, "Moderate": 1, "Severe": 2}, "garbage_tokens": ["_", "Unknown"], "encoding": "ordinal"},
-    "Symptoms": {"action": "keep", "semantic_role": "multi_value_set", "representation_intent": "binary_membership", "cleaning": "split on ', ', strip whitespace, remove leading 'and '", "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": "multi_hot"},
-    "Diagnosis": {"action": "drop", "semantic_role": "target", "representation_intent": null, "cleaning": null, "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null}
+    "Patient_ID": {"action": "drop", "semantic_role": "group_identifier", "representation_intent": null, "primitive": null, "primitive_params": null, "semantic_subtype": null, "cleaning": null, "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
+    "Age": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "primitive": "parse_age_series", "primitive_params": {"bounds": [0, 120]}, "semantic_subtype": "human_age", "cleaning": "extract age token, then mark values outside [0, 120] as NaN", "imputation": "group_median", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
+    "Blood_Pressure": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "primitive": "parse_dirty_numeric", "primitive_params": {"bounds": [40, 250]}, "semantic_subtype": null, "cleaning": "strip non-numeric artifacts, convert to float, clip to [40, 250]", "imputation": "group_median", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
+    "Diastolic_BP": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "primitive": "parse_dirty_numeric", "primitive_params": {"bounds": [30, 150]}, "semantic_subtype": null, "cleaning": "strip non-numeric artifacts, convert to float, clip to [30, 150]", "imputation": "fallback_formula", "group_impute_by": null, "bucket_spec": null, "fallback_formula": "Blood_Pressure * 0.65", "ordinal_mapping": null, "encoding": null},
+    "Med_Dose_mg": {"action": "keep", "semantic_role": "numeric_continuous", "representation_intent": "raw", "primitive": "fill_numeric_by_group_then_global", "primitive_params": {"group_by": ["Age_Bucket", "Smoker"], "bounds": [0, 500]}, "semantic_subtype": "currency_amount", "cleaning": "convert to float, clip to [0, 500]", "imputation": "group_median", "group_impute_by": ["Age_Bucket", "Smoker"], "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
+    "Visit_Count": {"action": "keep", "semantic_role": "numeric_count", "representation_intent": "raw", "primitive": "parse_dirty_numeric", "primitive_params": {"lower_bound": 0, "upper_bound": 100}, "semantic_subtype": null, "cleaning": "mark values < 0 as NaN, clip upper 100", "imputation": "group_median", "group_impute_by": "Severity_Bucket", "bucket_spec": {"source": "Severity_Score", "edges": [-1, 3, 6, 10], "labels": [0, 1, 2]}, "fallback_formula": null, "ordinal_mapping": null, "encoding": null},
+    "Smoker": {"action": "keep", "semantic_role": "binary_flag", "representation_intent": null, "primitive": "missing_string_mask", "primitive_params": {"garbage_tokens": ["Unknown"]}, "semantic_subtype": null, "cleaning": "map {'Yes':1,'No':0}", "imputation": "mode", "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "garbage_tokens": null, "encoding": null},
+    "Severity": {"action": "keep", "semantic_role": "ordered_categorical", "representation_intent": null, "primitive": "missing_string_mask", "primitive_params": {"garbage_tokens": ["_", "Unknown"]}, "semantic_subtype": null, "cleaning": "replace placeholder tokens with NaN, then map", "imputation": "group_mode", "group_impute_by": "Patient_ID", "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": {"Mild": 0, "Moderate": 1, "Severe": 2}, "garbage_tokens": ["_", "Unknown"], "encoding": "ordinal"},
+    "Symptoms": {"action": "keep", "semantic_role": "multi_value_set", "representation_intent": "binary_membership", "primitive": "multi_hot_membership", "primitive_params": {"delimiter": ",", "strip_whitespace": true}, "semantic_subtype": null, "cleaning": "split on ', ', strip whitespace, remove leading 'and '", "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": "multi_hot"},
+    "Diagnosis": {"action": "drop", "semantic_role": "target", "representation_intent": null, "primitive": null, "primitive_params": null, "semantic_subtype": null, "cleaning": null, "imputation": null, "group_impute_by": null, "bucket_spec": null, "fallback_formula": null, "ordinal_mapping": null, "encoding": null}
   },
   "reasoning": {
     "Patient_ID": "group_identifier — same patient recurs across visits; used by splitter and as imputation group",

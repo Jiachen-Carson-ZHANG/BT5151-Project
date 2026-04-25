@@ -19,7 +19,7 @@ These guide your reasoning about *what* to engineer and *why*. Understand them s
 
 2. **EDA hypotheses are prioritized ideas, not directives.** If `eda_hypotheses` is provided, it contains tested predictions and exploratory leads from the EDA analysis layer. Use them as candidate feature ideas to consider seriously, but never force a feature just because EDA suggested it. Semantic correctness comes first: if an EDA idea would require a meaningless transform, duplicate an already-encoded signal, or weaken a stronger raw-feature relationship, do not implement it. In your hypothesis field, explain which EDA hypotheses you acted on and which you rejected.
 
-3. **EDA and train_stats are your evidence base.** You have mutual information rankings (which features predict the target), correlation pairs (which features are redundant), skewness values (which distributions will hurt linear learners), and column statistics. Use these numbers to prioritize: engineer interactions from high-MI features (they carry the most signal), drop one of each highly-correlated pair (redundancy without information gain), and only then consider skew transforms for standalone columns that still need reshaping. Cite specific numbers in your hypothesis.
+3. **EDA and train_stats are your evidence base.** You have model-eligible mutual information rankings (which trainable features predict the target), correlation pairs (which features are redundant), skewness values (which distributions will hurt linear learners), and column statistics. Use these numbers to prioritize: engineer interactions from high-MI features (they carry the most signal), drop one of each highly-correlated pair (redundancy without information gain), and only then consider skew transforms for standalone columns that still need reshaping. Cite specific numbers in your hypothesis. Raw MI on blocked identifier/leakage fields is audit context, not a feature-engineering target.
 
 4. **Interaction features MUST use raw values, not transformed values.** When you create ratios or products from two columns, compute them BEFORE applying log or other transforms. A ratio like `EMI / Salary` has clear semantic meaning (debt burden fraction). But `log(1+EMI) / Salary` is meaningless — the log compression destroys the interpretable scale. Code ordering: (1) compute interactions from raw columns, (2) then apply log/skew transforms to the original columns. Never apply a monotonic transform to a column and then use the transformed version in an interaction.
 
@@ -34,7 +34,7 @@ These guide your reasoning about *what* to engineer and *why*. Understand them s
 
 Before writing code, analyze the inputs and form a hypothesis. Consider:
 
-- **Which features have the highest discriminative power?** Look at `eda_insights.top_discriminative_features` (mutual information). The top features are your best candidates for interaction engineering — combining two high-MI features into a ratio or product often captures relationships the model can't learn from raw features alone.
+- **Which features have the highest discriminative power?** Look at `eda_insights.model_eligible_top_discriminative_features` (or the backward-compatible alias `eda_insights.top_discriminative_features`). These trainable high-MI features are your best candidates for interaction engineering — combining two high-MI features into a ratio or product often captures relationships the model can't learn from raw features alone.
 - **Which features are redundant?** Look at `eda_insights.high_correlation_pairs` and the one-hot columns. Perfectly anti-correlated one-hot pairs (X_Yes/X_No) waste a dimension. Highly correlated continuous features (|r| > 0.95) add no unique information.
 - **Which standalone columns need reshaping after interactions are built?** Look at `eda_insights.highly_skewed_columns` and `train_stats.skew`. Extreme skew can compress most data into a tiny range, but skew transforms happen only after you have created any semantic ratios or products from the raw parent columns.
 - **What domain-meaningful combinations exist?** From column names and semantics, what real-world quantities can you approximate? Ratios (X per unit of Y), differences (change or gap), products (joint magnitude). Each must have a plain-language interpretation.
@@ -54,7 +54,9 @@ Before writing code, analyze the inputs and form a hypothesis. Consider:
 
   Apply the three-step ratio stabilization (inf→NaN, fill with train median, clip to p99) to every ratio you create — never skip it for this feature class.
 
-- **What is likely noise?** Constant columns, near-zero variance columns, and features with very low MI are candidates for removal. Fewer features means less overfitting risk.
+- **What is likely noise?** Constant columns, near-zero variance columns, and features with very low model-eligible MI are candidates for removal. Fewer features means less overfitting risk.
+
+- **What is audit-only signal?** If `eda_insights.raw_top_discriminative_features` surfaces blocked identifier/group/leakage fields and `eda_insights.leakage_alerts` flags them, mention them only as audit observations. Do not create interactions or protection rules around columns the model is not allowed to keep.
 
 Your reasoning feeds directly into the `hypothesis` field of the output. Every decision in your code should trace back to this analysis.
 
@@ -283,7 +285,10 @@ Only use: `pandas`, `numpy`, `json`, `pathlib`.
 - `train_rows` / `test_rows` — row counts
 - `dataset_profile` — dataset-level metadata
 - `eda_insights` (optional) — statistical analysis from the EDA node:
-  - `top_discriminative_features` — features ranked by mutual information with target
+  - `top_discriminative_features` — backward-compatible alias for model-eligible features ranked by mutual information with target
+  - `model_eligible_top_discriminative_features` — authoritative MI ranking for modeling decisions
+  - `raw_top_discriminative_features` — raw MI ranking before leakage filtering (audit only)
+  - `leakage_alerts` — blocked/suspicious high-MI fields that should not drive feature engineering
   - `high_correlation_pairs` — pairs with |r| > 0.8
   - `highly_skewed_columns` — columns with |skew| > 2 and their skewness values
 - `eda_hypotheses` (optional) — three-tier hypotheses from the EDA interpretation layer:

@@ -40,7 +40,26 @@ These are enforced by static analysis — repaired code that violates them will 
 - `code_review` — static inspection results (if inspection failed)
 - `execution_log` — subprocess stdout, stderr, returncode (if execution failed)
 - `validation_report` — artifact validation and quality review results (if validation or quality review failed)
-- `dataset_profile`, `dataset_policy_spec`, `column_transform_spec` — the original specs
+- `dataset_profile`, `dataset_policy_spec`, `column_transform_spec`, `allowed_cleaning_primitives` — the original specs
+
+## Deterministic cleaning primitive contract
+
+The repair payload may include `allowed_cleaning_primitives`, and each transform may declare `primitive`, `primitive_params`, and `semantic_subtype`.
+
+- `semantic_role` is still the governing validator contract.
+- `primitive` is an approved runtime cleaning pattern. If the failed code hand-rolled logic that disagrees with an explicit primitive, the primitive wins.
+- `primitive_params` tells you what concrete bounds, tokens, delimiters, or group columns the repaired code must honor.
+- `semantic_subtype` can help you reason about plausibility, but it must not replace the declared role.
+
+When fixing a bug, prefer repairing the code toward these canonical implementations:
+
+- `parse_dirty_numeric` -> vectorized artifact stripping + numeric coercion
+- `parse_age_series` -> extract first numeric age token
+- `parse_duration_months` -> tolerant `"years / months"` parser with connector handling
+- `missing_string_mask` -> normalize placeholder strings to missing before fill
+- `multi_hot_membership` -> presence-based `str.get_dummies`, whitespace strip, dedupe, prefix, zero-out missing rows
+- `fill_numeric_by_group_then_global` -> grouped transform plus global fallback
+- `cap_credit_history_by_adulthood` -> numeric cap tied to applicant age
 
 ## Output format
 
@@ -58,6 +77,7 @@ Return **only** a raw JSON object (no markdown fences, no explanation text) with
 These are common pandas pitfalls. Use them as reference when relevant to the bug you're diagnosing — you don't need to apply all of them mechanically.
 
 - **Numeric conversion:** Always use `pd.to_numeric(col, errors='coerce')` — never `.replace().astype()`. Assign to an intermediate variable before calling `.median()`, `.clip()`, etc., so you're not aggregating the unconverted string column.
+- **Honor explicit primitives before inventing new parsing logic.** If `column_transform_spec.transforms[col]['primitive']` is set, repair toward that canonical behavior first. A custom regex that "kind of works" but disagrees with the primitive contract is still wrong.
 - **`str.extract` with multiple capture groups** returns a DataFrame, not a Series. Assign each group to its own variable, then combine.
 - **Duration strings often include connector words.** Formats like `"22 Years and 7 Months"` require a regex that tolerates `and` or similar filler tokens between units. If a parsed duration column becomes constant or all zeros after repair, assume the regex failed to match and rework the pattern before imputing.
 - **Multi-value delimited columns:** Use `str.get_dummies(sep=...)` to produce binary columns while preserving row count. After splitting, strip whitespace from column names (` str.get_dummies` doesn't strip), merge any resulting duplicates, and drop empty-name columns from trailing delimiters. Never use `explode` (changes row count) or raw `pd.get_dummies` on combined strings (cardinality explosion).

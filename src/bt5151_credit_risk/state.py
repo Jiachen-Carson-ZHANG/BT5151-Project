@@ -15,6 +15,7 @@ class CreditRiskState(BaseModel):
     column_transform_spec: dict | None = None
     preprocessing_code: dict | None = None
     preprocessing_codegen_metadata: dict | None = None
+    preprocessing_codegen_snapshot_path: str | None = None
     preprocessing_code_review: dict | None = None
     preprocessing_rules: dict | None = None
     preprocessing_workspace: str | None = None
@@ -28,6 +29,8 @@ class CreditRiskState(BaseModel):
     preprocessing_last_role_violations: list | None = None
     preprocessing_escalation_triggered: bool = False
     feature_engineering_code: dict | None = None
+    feature_engineering_codegen_metadata: dict | None = None
+    feature_engineering_codegen_snapshot_path: str | None = None
     feature_engineering_code_review: dict | None = None
     feature_engineering_execution_log: dict | None = None
     feature_engineering_validation_report: dict | None = None
@@ -57,6 +60,7 @@ class CreditRiskState(BaseModel):
     trained_models: dict | None = None
     learning_curves: dict | None = None
     tuning_trial_history: dict | None = None
+    tuning_artifact_path: str | None = None
     evaluation_results: dict | None = None
     training_diagnostics: dict | None = None
     selected_model_name: str | None = None

@@ -9,6 +9,7 @@ from langgraph.graph import END, START, StateGraph
 logger = logging.getLogger(__name__)
 
 from bt5151_credit_risk.business import explain_risk
+from bt5151_credit_risk.codegen_audit import record_codegen_attempt
 from bt5151_credit_risk.config import FEATURE_ENGINEERING_MODE
 from bt5151_credit_risk.eda import build_eda_report
 from bt5151_credit_risk.evaluate import choose_best_model, compute_multiclass_metrics, reason_model_selection
@@ -51,6 +52,87 @@ from bt5151_credit_risk.train import build_candidate_models, extract_learning_cu
 
 MAX_REPAIR_ATTEMPTS = 5
 MAX_FE_REPAIR_ATTEMPTS = 3
+
+
+def _codegen_log_root(state) -> Path:
+    raw_dataset_path = getattr(state, "raw_dataset_path", None)
+    base_dir = Path(raw_dataset_path).resolve().parent if raw_dataset_path else Path.cwd()
+    return base_dir / "lab" / "logs" / "codegen"
+
+
+def _snapshot_root(state, family: str) -> Path:
+    run_id = getattr(state, "run_id", None) or "adhoc"
+    return _codegen_log_root(state) / run_id / family
+
+
+def _tuning_log_root(state) -> Path:
+    raw_dataset_path = getattr(state, "raw_dataset_path", None)
+    base_dir = Path(raw_dataset_path).resolve().parent if raw_dataset_path else Path.cwd()
+    run_id = getattr(state, "run_id", None) or "adhoc"
+    return base_dir / "lab" / "logs" / "tuning" / run_id
+
+
+def _persist_tuning_artifacts(
+    state,
+    *,
+    grids: dict,
+    tuning_results: dict,
+    trial_histories: dict,
+    validation_policy: dict,
+    baseline_metrics: dict,
+) -> str | None:
+    if not (grids or tuning_results or trial_histories):
+        return None
+
+    root = _tuning_log_root(state)
+    root.mkdir(parents=True, exist_ok=True)
+
+    (root / "grids.json").write_text(
+        json.dumps(grids or {}, indent=2, default=str),
+        encoding="utf-8",
+    )
+    (root / "trial_history.json").write_text(
+        json.dumps(trial_histories or {}, indent=2, default=str),
+        encoding="utf-8",
+    )
+    summary = {
+        "run_id": getattr(state, "run_id", None),
+        "validation_policy": validation_policy,
+        "baseline_metrics": baseline_metrics,
+        "tuning_results": tuning_results,
+    }
+    (root / "summary.json").write_text(
+        json.dumps(summary, indent=2, default=str),
+        encoding="utf-8",
+    )
+    return str(root)
+
+
+def _record_codegen_snapshot(
+    state,
+    *,
+    family: str,
+    attempt_label: str,
+    generated_code: dict | None = None,
+    metadata: dict | None = None,
+    execution_log: dict | None = None,
+    validation_report: dict | None = None,
+    audit_report: dict | None = None,
+) -> Path:
+    audit_payload = (generated_code or {}).get("_codegen_audit") if isinstance(generated_code, dict) else {}
+    return record_codegen_attempt(
+        log_root=_codegen_log_root(state),
+        run_id=getattr(state, "run_id", None),
+        family=family,
+        attempt_label=attempt_label,
+        generated_code=generated_code,
+        prompt_payload=(audit_payload or {}).get("prompt_payload"),
+        response_payload=generated_code,
+        metadata=metadata,
+        execution_log=execution_log,
+        validation_report=validation_report,
+        audit_report=audit_report,
+    )
 
 
 def _default_feature_view_name(view_dict):
@@ -143,7 +225,11 @@ def exploratory_data_analysis_node(state: CreditRiskState):
         logger.warning("    no target column in policy spec, skipping EDA")
         return {"eda_report": {}}
 
-    eda_report = build_eda_report(state.raw_frame, target_column)
+    eda_report = build_eda_report(
+        state.raw_frame,
+        target_column,
+        dataset_policy_spec=state.dataset_policy_spec,
+    )
 
     # Log key findings
     high_pairs = eda_report.get("correlations", {}).get("high_pairs", [])
@@ -157,6 +243,17 @@ def exploratory_data_analysis_node(state: CreditRiskState):
         logger.info("    top discriminative features (mutual information):")
         for feat in top_features[:10]:
             logger.info("      %s: MI=%.4f", feat["column"], feat["mutual_information"])
+    leakage_alerts = eda_report.get("leakage_alerts", [])
+    if leakage_alerts:
+        logger.warning("    leakage / eligibility alerts in raw top-MI features: %d", len(leakage_alerts))
+        for entry in leakage_alerts[:10]:
+            logger.warning(
+                "      %s: MI=%.4f [%s/%s]",
+                entry["column"],
+                entry.get("mutual_information") or 0.0,
+                entry["severity"],
+                entry["reason"],
+            )
 
     skewed = eda_report.get("skewness", {}).get("highly_skewed", {})
     if skewed:
@@ -249,11 +346,29 @@ def generate_preprocessing_code_node(state: CreditRiskState):
         state.column_transform_spec,
     )
     logger.info("    entrypoint: %s, code length: %d chars", generated_code.get("entrypoint"), len(generated_code.get("code", "")))
+    attempt_label = "01_generate_preprocessing_code"
+    attempt_path = _record_codegen_snapshot(
+        state,
+        family="preprocessing",
+        attempt_label=attempt_label,
+        generated_code=generated_code,
+        metadata={
+            "attempt_label": attempt_label,
+            "attempt_number": 1,
+            "caller": "generate-preprocessing-code",
+            "entrypoint": generated_code.get("entrypoint"),
+        },
+    )
     return {
         "preprocessing_code": generated_code,
         "preprocessing_codegen_metadata": {
+            "attempt_label": attempt_label,
+            "attempt_number": 1,
+            "attempt_path": str(attempt_path),
+            "caller": "generate-preprocessing-code",
             "entrypoint": generated_code.get("entrypoint"),
         },
+        "preprocessing_codegen_snapshot_path": str(attempt_path.parent),
         "preprocessing_attempt_count": 1,
     }
 
@@ -266,6 +381,14 @@ def inspect_preprocessing_code_node(state: CreditRiskState):
     if not code_review.get("passed"):
         for issue in code_review.get("issues", []):
             logger.warning("    inspection issue: [%s] %s", issue.get("rule"), issue.get("message"))
+    attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="preprocessing",
+            attempt_label=attempt_label,
+            metadata={"code_review": code_review},
+        )
     return {
         "preprocessing_code_review": code_review,
     }
@@ -288,6 +411,19 @@ def execute_generated_preprocessing_node(state: CreditRiskState):
     missing = execution_result.get("missing_artifacts", [])
     if missing:
         logger.warning("    missing artifacts: %s", missing)
+    attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="preprocessing",
+            attempt_label=attempt_label,
+            metadata={
+                "workspace_path": execution_result.get("workspace_path"),
+                "artifacts": execution_result.get("artifacts"),
+                "missing_artifacts": execution_result.get("missing_artifacts"),
+            },
+            execution_log=execution_result.get("execution_log"),
+        )
     return {
         "preprocessing_workspace": execution_result["workspace_path"],
         "preprocessing_raw_frame_path": execution_result["raw_frame_path"],
@@ -375,6 +511,14 @@ def validate_preprocessing_output_node(state: CreditRiskState):
         )
 
     if not validation_report["passed"]:
+        attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+        if attempt_label:
+            _record_codegen_snapshot(
+                state,
+                family="preprocessing",
+                attempt_label=attempt_label,
+                validation_report=validation_report,
+            )
         return {
             "preprocessing_validation_report": validation_report,
             "preprocessing_last_role_violations": current_violations,
@@ -457,6 +601,14 @@ def validate_preprocessing_output_node(state: CreditRiskState):
     cleanup_old_workspaces(run_root, keep_latest=1)
 
     logger.info("    class_names: %s, train: %d, test: %d", class_names, len(train_indices), len(test_indices))
+    attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="preprocessing",
+            attempt_label=attempt_label,
+            validation_report=validation_report,
+        )
     return {
         "preprocessing_validation_report": validation_report,
         "full_feature_frame": feature_frame,
@@ -484,7 +636,16 @@ def review_preprocessing_quality_node(state: CreditRiskState):
     validation = state.preprocessing_validation_report or {}
     if not validation.get("passed", False):
         logger.info("    skipping LLM quality review — structural validation failed")
-        return {"preprocessing_audit_report": {"verdict": "skip", "issues": [], "summary": "Skipped — structural validation failed."}}
+        attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+        skip_report = {"verdict": "skip", "issues": [], "summary": "Skipped — structural validation failed."}
+        if attempt_label:
+            _record_codegen_snapshot(
+                state,
+                family="preprocessing",
+                attempt_label=attempt_label,
+                audit_report=skip_report,
+            )
+        return {"preprocessing_audit_report": skip_report}
 
     execution_result = {
         "workspace_path": state.preprocessing_workspace,
@@ -522,6 +683,14 @@ def review_preprocessing_quality_node(state: CreditRiskState):
                    issue.get("severity"), issue.get("category"),
                    issue.get("column") or "general", issue.get("description"))
     logger.info("    summary: %s", audit_report.get("summary"))
+    attempt_label = (getattr(state, "preprocessing_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="preprocessing",
+            attempt_label=attempt_label,
+            audit_report=audit_report,
+        )
 
     # Feed quality issues into the validation report so the repair loop can see them.
     # Preserve the original structural pass/fail separately so the routing function
@@ -567,11 +736,30 @@ def repair_preprocessing_code_node(state: CreditRiskState):
         column_transform_spec=state.column_transform_spec,
         escalate=escalate,
     )
+    next_attempt = attempt_count + 1
+    attempt_label = f"{next_attempt:02d}_repair_preprocessing_code"
+    attempt_path = _record_codegen_snapshot(
+        state,
+        family="preprocessing",
+        attempt_label=attempt_label,
+        generated_code=repaired_code,
+        metadata={
+            "attempt_label": attempt_label,
+            "attempt_number": next_attempt,
+            "caller": "repair-preprocessing-code-escalated" if escalate else "repair-preprocessing-code",
+            "entrypoint": repaired_code.get("entrypoint"),
+        },
+    )
     return {
         "preprocessing_code": repaired_code,
         "preprocessing_codegen_metadata": {
+            "attempt_label": attempt_label,
+            "attempt_number": next_attempt,
+            "attempt_path": str(attempt_path),
+            "caller": "repair-preprocessing-code-escalated" if escalate else "repair-preprocessing-code",
             "entrypoint": repaired_code.get("entrypoint"),
         },
+        "preprocessing_codegen_snapshot_path": str(attempt_path.parent),
         "preprocessing_attempt_count": attempt_count + 1,
         "preprocessing_escalation_triggered": False,  # consume trigger; re-arm only if repeat persists
     }
@@ -620,8 +808,31 @@ def generate_feature_engineering_code_node(state: CreditRiskState):
         hypothesis = generated_code.pop("hypothesis", None)
         if hypothesis:
             _log_fe_hypothesis(hypothesis)
+        attempt_label = "01_generate_feature_engineering_code"
+        attempt_path = _record_codegen_snapshot(
+            state,
+            family="feature_engineering",
+            attempt_label=attempt_label,
+            generated_code=generated_code,
+            metadata={
+                "attempt_label": attempt_label,
+                "attempt_number": 1,
+                "caller": "generate-feature-engineering-code",
+                "entrypoint": generated_code.get("entrypoint"),
+                "mode": "deterministic",
+            },
+        )
         return {
             "feature_engineering_code": generated_code,
+            "feature_engineering_codegen_metadata": {
+                "attempt_label": attempt_label,
+                "attempt_number": 1,
+                "attempt_path": str(attempt_path),
+                "caller": "generate-feature-engineering-code",
+                "entrypoint": generated_code.get("entrypoint"),
+                "mode": "deterministic",
+            },
+            "feature_engineering_codegen_snapshot_path": str(attempt_path.parent),
             "feature_engineering_hypothesis": hypothesis,
             "feature_engineering_attempt_count": 1,
         }
@@ -642,9 +853,32 @@ def generate_feature_engineering_code_node(state: CreditRiskState):
     hypothesis = generated_code.pop("hypothesis", None)
     if hypothesis:
         _log_fe_hypothesis(hypothesis)
+    attempt_label = "01_generate_feature_engineering_code"
+    attempt_path = _record_codegen_snapshot(
+        state,
+        family="feature_engineering",
+        attempt_label=attempt_label,
+        generated_code=generated_code,
+        metadata={
+            "attempt_label": attempt_label,
+            "attempt_number": 1,
+            "caller": "generate-feature-engineering-code",
+            "entrypoint": generated_code.get("entrypoint"),
+            "mode": "llm",
+        },
+    )
 
     return {
         "feature_engineering_code": generated_code,
+        "feature_engineering_codegen_metadata": {
+            "attempt_label": attempt_label,
+            "attempt_number": 1,
+            "attempt_path": str(attempt_path),
+            "caller": "generate-feature-engineering-code",
+            "entrypoint": generated_code.get("entrypoint"),
+            "mode": "llm",
+        },
+        "feature_engineering_codegen_snapshot_path": str(attempt_path.parent),
         "feature_engineering_hypothesis": hypothesis,
         "feature_engineering_attempt_count": 1,
     }
@@ -660,6 +894,14 @@ def inspect_feature_engineering_code_node(state: CreditRiskState):
     if not passed:
         for issue in code_review.get("issues", []):
             logger.warning("    inspection issue: [%s] %s", issue.get("rule"), issue.get("message"))
+    attempt_label = (getattr(state, "feature_engineering_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="feature_engineering",
+            attempt_label=attempt_label,
+            metadata={"code_review": code_review},
+        )
     return {"feature_engineering_code_review": code_review}
 
 
@@ -682,6 +924,19 @@ def execute_feature_engineering_node(state: CreditRiskState):
     missing = execution_result.get("missing_artifacts", [])
     if missing:
         logger.warning("    missing artifacts: %s", missing)
+    attempt_label = (getattr(state, "feature_engineering_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="feature_engineering",
+            attempt_label=attempt_label,
+            metadata={
+                "workspace_path": execution_result.get("workspace_path"),
+                "artifacts": execution_result.get("artifacts"),
+                "missing_artifacts": execution_result.get("missing_artifacts"),
+            },
+            execution_log=execution_result.get("execution_log"),
+        )
     return {"feature_engineering_execution_log": execution_result}
 
 
@@ -742,6 +997,7 @@ def validate_feature_engineering_node(state: CreditRiskState):
         deferred_categoricals=state.deferred_categorical_columns,
         top_mi_features=_top_mi,
         train_frame_pre_fe=state.train_frame,
+        column_transform_spec=state.column_transform_spec,
     )
     if validation_report.get("passed"):
         logger.info("    validation passed")
@@ -754,6 +1010,14 @@ def validate_feature_engineering_node(state: CreditRiskState):
             logger.warning("    lineage violation: [%s] %s", err.get("rule"), err.get("message"))
 
     if not validation_report["passed"]:
+        attempt_label = (getattr(state, "feature_engineering_codegen_metadata", None) or {}).get("attempt_label")
+        if attempt_label:
+            _record_codegen_snapshot(
+                state,
+                family="feature_engineering",
+                attempt_label=attempt_label,
+                validation_report=validation_report,
+            )
         return {"feature_engineering_validation_report": validation_report}
 
     artifacts = execution_result.get("artifacts", {})
@@ -815,6 +1079,14 @@ def validate_feature_engineering_node(state: CreditRiskState):
                         logger.info("      %s", json.dumps(item, default=str)[:150])
         except Exception:
             pass
+    attempt_label = (getattr(state, "feature_engineering_codegen_metadata", None) or {}).get("attempt_label")
+    if attempt_label:
+        _record_codegen_snapshot(
+            state,
+            family="feature_engineering",
+            attempt_label=attempt_label,
+            validation_report=validation_report,
+        )
 
     return {
         "feature_engineering_validation_report": validation_report,
@@ -839,8 +1111,32 @@ def repair_feature_engineering_code_node(state: CreditRiskState):
             "    FE repair attempts exhausted; using deterministic fallback feature engineering code."
         )
         fallback_code = deterministic_feature_engineering_fallback_code()
+        next_attempt = attempt_count + 1
+        attempt_label = f"{next_attempt:02d}_repair_feature_engineering_code"
+        attempt_path = _record_codegen_snapshot(
+            state,
+            family="feature_engineering",
+            attempt_label=attempt_label,
+            generated_code=fallback_code,
+            metadata={
+                "attempt_label": attempt_label,
+                "attempt_number": next_attempt,
+                "caller": "repair-feature-engineering-code-fallback",
+                "entrypoint": fallback_code.get("entrypoint"),
+                "mode": "deterministic_fallback",
+            },
+        )
         return {
             "feature_engineering_code": fallback_code,
+            "feature_engineering_codegen_metadata": {
+                "attempt_label": attempt_label,
+                "attempt_number": next_attempt,
+                "attempt_path": str(attempt_path),
+                "caller": "repair-feature-engineering-code-fallback",
+                "entrypoint": fallback_code.get("entrypoint"),
+                "mode": "deterministic_fallback",
+            },
+            "feature_engineering_codegen_snapshot_path": str(attempt_path.parent),
             "feature_engineering_hypothesis": fallback_code.get("hypothesis", {}),
             "feature_engineering_attempt_count": attempt_count + 1,
         }
@@ -855,8 +1151,30 @@ def repair_feature_engineering_code_node(state: CreditRiskState):
         dataset_profile=state.dataset_profile,
         deferred_categorical_columns=state.deferred_categorical_columns,
     )
+    next_attempt = attempt_count + 1
+    attempt_label = f"{next_attempt:02d}_repair_feature_engineering_code"
+    attempt_path = _record_codegen_snapshot(
+        state,
+        family="feature_engineering",
+        attempt_label=attempt_label,
+        generated_code=repaired_code,
+        metadata={
+            "attempt_label": attempt_label,
+            "attempt_number": next_attempt,
+            "caller": "repair-feature-engineering-code",
+            "entrypoint": repaired_code.get("entrypoint"),
+        },
+    )
     return {
         "feature_engineering_code": repaired_code,
+        "feature_engineering_codegen_metadata": {
+            "attempt_label": attempt_label,
+            "attempt_number": next_attempt,
+            "attempt_path": str(attempt_path),
+            "caller": "repair-feature-engineering-code",
+            "entrypoint": repaired_code.get("entrypoint"),
+        },
+        "feature_engineering_codegen_snapshot_path": str(attempt_path.parent),
         "feature_engineering_attempt_count": attempt_count + 1,
     }
 
@@ -975,12 +1293,21 @@ def train_models_node(state: CreditRiskState):
             "tuning": tuning_results.get(model_name),
             "feature_view": _get_model_view_name(state, model_name),
         }
+    tuning_artifact_path = _persist_tuning_artifacts(
+        state,
+        grids=grids,
+        tuning_results=tuning_results,
+        trial_histories=trial_histories,
+        validation_policy=validation_policy,
+        baseline_metrics=baseline_metrics,
+    )
     logger.info("    trained models: %s", list(tuned_models.keys()))
     return {
         "candidate_model_specs": candidate_model_specs,
         "trained_models": tuned_models,
         "learning_curves": learning_curves if learning_curves else None,
         "tuning_trial_history": trial_histories if trial_histories else None,
+        "tuning_artifact_path": tuning_artifact_path,
     }
 
 

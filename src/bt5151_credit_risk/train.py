@@ -1,3 +1,4 @@
+import copy
 import logging
 
 import numpy as np
@@ -18,15 +19,10 @@ from xgboost import XGBClassifier
 
 from sklearn.model_selection import train_test_split
 
+from bt5151_credit_risk import config as app_config
 from bt5151_credit_risk.config import RANDOM_SEED
 from bt5151_credit_risk.llm import call_json_response
 from bt5151_credit_risk.skill_prompts import load_skill_prompt
-
-# Subsample threshold for Optuna tuning — datasets larger than this are
-# downsampled during the hyperparameter search.  Hyperparameter rankings are
-# stable with 15-20k rows so this does not hurt quality, but it cuts per-fit
-# time dramatically (RF on 66k rows ≈ 26s vs ~4s on 15k).
-_TUNE_SUBSAMPLE_MAX = 15_000
 
 logger = logging.getLogger(__name__)
 
@@ -196,14 +192,14 @@ def _subsample_for_tuning(
     validation_policy=None,
 ):
     policy = _normalize_validation_policy(validation_policy, group_values, time_values)
-    if len(frame) <= _TUNE_SUBSAMPLE_MAX:
+    if len(frame) <= app_config.TUNING_SUBSAMPLE_MAX:
         return frame, target, sample_weights, group_values, time_values
 
     if policy["type"] == "grouped_entity" and group_values is not None:
         groups = np.asarray(group_values)
         unique_groups = pd.Series(groups).dropna().nunique()
         if unique_groups >= 2:
-            train_fraction = min(0.95, _TUNE_SUBSAMPLE_MAX / len(frame))
+            train_fraction = min(0.95, app_config.TUNING_SUBSAMPLE_MAX / len(frame))
             splitter = GroupShuffleSplit(
                 n_splits=1,
                 train_size=train_fraction,
@@ -221,7 +217,7 @@ def _subsample_for_tuning(
             )
 
     if policy["type"] == "temporal" and time_values is not None:
-        evenly_spaced = np.linspace(0, len(frame) - 1, _TUNE_SUBSAMPLE_MAX, dtype=int)
+        evenly_spaced = np.linspace(0, len(frame) - 1, app_config.TUNING_SUBSAMPLE_MAX, dtype=int)
         evenly_spaced = np.unique(evenly_spaced)
         return _select_rows(
             frame,
@@ -234,7 +230,7 @@ def _subsample_for_tuning(
 
     subset_idx, _ = train_test_split(
         np.arange(len(frame)),
-        train_size=_TUNE_SUBSAMPLE_MAX,
+        train_size=app_config.TUNING_SUBSAMPLE_MAX,
         stratify=target,
         random_state=RANDOM_SEED,
     )
@@ -316,6 +312,45 @@ def _suggest_params(trial, grid_spec, model_name):
     return params
 
 
+def _sanitize_grid_spec(grid_spec, model_name):
+    sanitized = copy.deepcopy(grid_spec or {})
+
+    if model_name in ("random_forest", "xgboost"):
+        sanitized.pop("n_estimators", None)
+
+    for param_name, spec in list(sanitized.items()):
+        if not isinstance(spec, dict):
+            sanitized.pop(param_name, None)
+            continue
+
+        low = spec.get("low")
+        high = spec.get("high")
+        if low is not None and high is not None and low > high:
+            spec["low"], spec["high"] = high, low
+
+        if spec.get("type", "float") == "int":
+            spec["step"] = max(1, int(spec.get("step", 1)))
+
+        if param_name == "max_depth" and "high" in spec:
+            spec["high"] = min(int(spec["high"]), app_config.TUNING_MAX_DEPTH_CAP)
+            if "low" in spec:
+                spec["low"] = min(int(spec["low"]), spec["high"])
+
+        if param_name in {"subsample", "colsample_bytree"}:
+            if "low" in spec:
+                spec["low"] = max(0.1, min(float(spec["low"]), 1.0))
+            if "high" in spec:
+                spec["high"] = max(spec.get("low", 0.1), min(float(spec["high"]), 1.0))
+
+        if spec.get("log"):
+            if "low" in spec:
+                spec["low"] = max(float(spec["low"]), 1e-6)
+            if "high" in spec:
+                spec["high"] = max(float(spec["high"]), spec.get("low", 1e-6))
+
+    return sanitized
+
+
 # Run Optuna Bayesian optimization for each model using LLM-reasoned grids.
 def tune_models(
     models,
@@ -344,7 +379,7 @@ def tune_models(
 
     # Subsample for tuning if dataset is large — hyperparameter rankings are
     # stable with 15k rows, but fit time scales linearly with row count.
-    if len(train_frame) > _TUNE_SUBSAMPLE_MAX:
+    if len(train_frame) > app_config.TUNING_SUBSAMPLE_MAX:
         tune_frame, tune_target, tune_weights, tune_group_values, tune_time_values = _subsample_for_tuning(
             train_frame,
             train_target,
@@ -369,36 +404,23 @@ def tune_models(
         tune_target,
         policy,
         group_values=tune_group_values,
-        n_splits=5,
+        n_splits=app_config.TUNING_CV_FOLDS,
     )
     logger.info("    tuning validation policy: %s (%d fold(s))", policy["type"], len(cv_splits))
 
     for model_name, model in models.items():
-        grid_spec = grids.get(model_name)
+        raw_grid_spec = grids.get(model_name)
+        grid_spec = _sanitize_grid_spec(raw_grid_spec, model_name)
         if not grid_spec:
             logger.info("    %s: no grid provided, using defaults", model_name)
             tuned_models[model_name] = model
             continue
 
-        # Safety net: cap max_depth if the LLM returns an unreasonably high range.
-        # Unlimited or very deep trees on 50k+ rows are the #1 training time killer.
-        if "max_depth" in grid_spec and grid_spec["max_depth"].get("high", 0) > 20:
-            logger.warning("    %s: capping max_depth upper bound from %d to 20",
-                           model_name, grid_spec["max_depth"]["high"])
-            grid_spec["max_depth"]["high"] = 20
-
-        # Remove n_estimators from tuning grids — RF uses a fixed count and
-        # XGBoost relies on early stopping, so tuning this wastes budget.
-        if model_name in ("random_forest", "xgboost") and "n_estimators" in grid_spec:
-            logger.info("    %s: removing n_estimators from grid (handled by defaults/early stopping)",
-                        model_name)
-            del grid_spec["n_estimators"]
-
         # For RF tuning, use fewer trees — 100 is enough to rank hyperparameter
         # configs.  The final retrain uses the model's default (200).
         tune_model = clone(model)
         if model_name == "random_forest":
-            tune_model.set_params(n_estimators=100)
+            tune_model.set_params(n_estimators=app_config.RF_TUNING_ESTIMATORS)
 
         # Build objective closure for this model.
         def make_objective(m_name, m_model, g_spec):
@@ -420,10 +442,10 @@ def tune_models(
 
                     fit_kwargs = {}
                     if m_name == "xgboost":
-                        # Early stopping: 500-round ceiling with patience 30.
-                        # On subsampled 12k rows, convergence is fast — 30
-                        # rounds is enough patience to avoid premature stops.
-                        cloned.set_params(n_estimators=500, early_stopping_rounds=30)
+                        cloned.set_params(
+                            n_estimators=app_config.XGB_TUNING_ESTIMATORS,
+                            early_stopping_rounds=app_config.XGB_TUNING_EARLY_STOPPING_ROUNDS,
+                        )
                         fit_kwargs["eval_set"] = [(X_val, y_val)]
                         fit_kwargs["verbose"] = False
                         if tune_weights is not None:
@@ -445,7 +467,7 @@ def tune_models(
             direction="maximize",
             sampler=optuna.samplers.TPESampler(seed=RANDOM_SEED),
         )
-        n_trials = 10
+        n_trials = app_config.OPTUNA_TRIALS
         logger.info("    %s: tuning with Optuna (%d trials, 5-fold CV)...", model_name, n_trials)
         study.optimize(objective_fn, n_trials=n_trials, n_jobs=1)
 
@@ -490,7 +512,10 @@ def tune_models(
                 len(es_idx),
             )
             es_model = clone(final_model)
-            es_model.set_params(n_estimators=1500, early_stopping_rounds=75)
+            es_model.set_params(
+                n_estimators=app_config.XGB_FINAL_EARLY_STOPPING_ESTIMATORS,
+                early_stopping_rounds=app_config.XGB_FINAL_EARLY_STOPPING_ROUNDS,
+            )
             es_fit_kwargs = {
                 "eval_set": [(X_tr, y_tr), (X_es, y_es)],
                 "verbose": False,
@@ -518,6 +543,7 @@ def tune_models(
         tuning_results[model_name] = {
             "best_params": best_params,
             "best_cv_score": best_cv_score,
+            "used_grid": grid_spec,
         }
 
     return tuned_models, tuning_results, trial_histories

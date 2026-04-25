@@ -61,6 +61,31 @@ def test_summarize_node_update_extracts_structured_fields():
     assert "preprocessing_validation_report" in event["state_keys_written"]
 
 
+def test_summarize_node_update_ignores_private_codegen_audit_payload_in_metrics():
+    from bt5151_credit_risk.trace_events import summarize_node_update
+
+    event = summarize_node_update(
+        "generate-preprocessing-code",
+        {
+            "preprocessing_code": {
+                "entrypoint": "run_preprocessing",
+                "_codegen_audit": {
+                    "prompt_payload": {
+                        "dataset_profile": {"row_count": 100000},
+                    }
+                },
+            },
+            "preprocessing_codegen_snapshot_path": "/tmp/codegen/preprocessing",
+        },
+        run_id="20260425_120000",
+        stage="preprocess",
+    )
+
+    assert event["artifacts"]["preprocessing_codegen_snapshot_path"] == "/tmp/codegen/preprocessing"
+    assert not any("_codegen_audit" in key for key in event["metrics"])
+    assert "preprocessing_code" in event["state_keys_written"]
+
+
 def test_stream_until_appends_trace_events(tmp_path):
     import run_stage as rs
 

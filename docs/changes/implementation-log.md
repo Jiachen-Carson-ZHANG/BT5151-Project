@@ -1,5 +1,202 @@
 # Implementation Log
 
+## 2026-04-25 — Wave 5: tuning hygiene
+
+**Context:** Training behavior was already deterministic and policy-aware, but the practical tuning surface was still too rigid. Core search-budget knobs lived as hard-coded values inside `train.py`, grid cleanup was split across a couple of inline heuristics, and trial history only lived in memory/state. Wave 5 was about making tuning easier to control and easier to audit without turning the LLM into the owner of numeric search.
+
+**Changes (`src/bt5151_credit_risk/config.py`, `src/bt5151_credit_risk/train.py`, `src/bt5151_credit_risk/graph.py`, `src/bt5151_credit_risk/state.py`, tests):**
+1. Moved tuning controls into env-backed config constants:
+   - `TUNING_SUBSAMPLE_MAX`
+   - `TUNING_CV_FOLDS`
+   - `OPTUNA_TRIALS`
+   - `TUNING_MAX_DEPTH_CAP`
+   - `RF_TUNING_ESTIMATORS`
+   - `XGB_TUNING_ESTIMATORS`
+   - `XGB_TUNING_EARLY_STOPPING_ROUNDS`
+   - `XGB_FINAL_EARLY_STOPPING_ESTIMATORS`
+   - `XGB_FINAL_EARLY_STOPPING_ROUNDS`
+2. Added `_sanitize_grid_spec()` in `train.py` so tree-model `n_estimators` is removed deterministically, over-deep `max_depth` is capped, reversed numeric ranges are repaired, and bounded fractions are clipped into valid ranges before Optuna sees them.
+3. Added persisted tuning artifacts under `lab/logs/tuning/<run_id>/` with:
+   - `grids.json`
+   - `trial_history.json`
+   - `summary.json`
+4. Exposed `tuning_artifact_path` in pipeline state so tuning provenance is available as a run-scoped artifact path.
+5. Added RED→GREEN coverage for env-backed config reads, grid sanitization, state exposure, and `train-models` artifact persistence.
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_preprocess.py tests/test_train.py tests/test_graph.py tests/test_state.py -q` → 75 passed
+
+**Must remain true:**
+- default tuning behavior should remain unchanged unless env vars are explicitly set
+- the LLM may suggest grids, but Python owns the final deterministic sanitization
+- tuning provenance must be persisted on disk, not only held in memory/state
+
+## 2026-04-25 — Wave 4 batch 2: deterministic numeric-bound enforcement before preprocessing audit
+
+**Context:** Wave 4 batch 1 proved the extracted contract layer and deterministic FE path were sound, but the real `preprocess` run still needed one audit-driven repair for clipping/tail issues (`Monthly_Inhand_Salary`, `Total_EMI_per_month`, `Num_Credit_Inquiries`). That remaining repair did not indicate structural instability, but it did show one missing artifact-boundary guarantee: if the transform spec already declares numeric bounds, the runtime should enforce them before asking the LLM audit to rediscover them.
+
+**Changes (`src/bt5151_credit_risk/preprocess.py`, tests):**
+1. Added `_declared_numeric_bounds()` to derive numeric bounds from:
+   - `primitive_params.bounds`
+   - `primitive_params.lower_bound` / `upper_bound`
+   - explicit cleaning text such as `clip to [low, high]` or `values < low or > high`
+2. `normalize_preprocessing_artifacts()` now enforces those declared bounds on kept `numeric_continuous` and `numeric_count` columns in both `feature_frame.csv` and `cleaned_frame.csv` before the quality audit runs.
+3. Added RED→GREEN regression coverage proving out-of-range numeric values are deterministically bounded at the artifact layer.
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_preprocess.py tests/test_train.py tests/test_graph.py tests/test_state.py -q` → 75 passed
+
+**Must remain true:**
+- if the preprocessing spec already declares numeric bounds, the runtime must enforce them rather than relying on the LLM audit to notice violations later
+- this remains an artifact-boundary hardening step, not a replacement for the existing semantic-role / invariant contract layer
+
+## 2026-04-25 — Wave 4 batch 1: contract extraction + deterministic FE hardening
+
+**Context:** Waves 1 to 3 improved observability, leakage-aware reasoning, and preprocessing primitives, but two architectural seams were still too implicit. First, the preprocessing contract logic lived as large local validator bodies inside `preprocess.py`, which made the contract harder to test and easier to fork accidentally. Second, deterministic feature engineering was already the production default, but it still lived mainly as generated inline code, while FE subprocess imports depended too much on the caller environment. Wave 4 batch 1 extracted those seams into real modules and tightened FE validation so blocked columns cannot silently reappear.
+
+**Changes (`src/bt5151_credit_risk/schema_contracts.py`, `src/bt5151_credit_risk/deterministic_fe.py`, `src/bt5151_credit_risk/feature_engineering.py`, `src/bt5151_credit_risk/preprocess.py`, `src/bt5151_credit_risk/graph.py`, tests):**
+1. Added `schema_contracts.py` as the extracted deterministic preprocessing contract layer for:
+   - semantic-role validation
+   - cross-field invariant validation
+2. Refactored `preprocess.py` to delegate to that extracted layer instead of keeping duplicate unreachable local validator bodies.
+3. Added `deterministic_fe.py` as the extracted deterministic FE library. It now owns the conservative production FE path:
+   - preserves validated preprocessing columns
+   - drops blocked identifier / leakage / quarantined columns before FE
+   - adds conservative ratio features when safe
+   - encodes deferred categoricals
+   - writes the standard FE artifacts plus lineage/report files
+4. Hardened `execute_feature_engineering()` so generated FE code can import repo helpers by explicitly injecting repository `src/` into subprocess `PYTHONPATH` and runtime `sys.path`.
+5. Hardened FE validation with `blocked_columns_absent`, so any column dropped/quarantined by the preprocessing spec, or carrying identifier/group/target/leakage roles, must remain absent from engineered outputs.
+6. Added RED→GREEN coverage for:
+   - extracted schema-contract entrypoints
+   - deterministic FE artifact generation
+   - generated FE code importing repo modules without inherited shell `PYTHONPATH`
+   - FE validation rejecting blocked-column resurrection
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_schema_contracts.py tests/test_deterministic_fe.py tests/test_feature_engineering.py tests/test_graph.py tests/test_preprocess.py -q` → 72 passed
+- Real-run verification: `PYTHONPATH=src .venv/bin/python3 run_stage.py preprocess` → completed cleanly as `stage_preprocess_20260425_151420.log`
+  - preprocessing generate/validate path succeeded structurally on attempt 1
+  - one audit-driven preprocessing repair remained for clipping/tail refinement
+  - deterministic FE executed and validated on attempt 1
+  - training completed and the stage exited cleanly at `train-models`
+
+**Must remain true:**
+- preprocessing contract logic should live in one deterministic module, not in duplicated local validator bodies
+- deterministic FE should remain importable and directly unit-testable outside generated-code strings
+- generated FE code must not depend on ambient shell `PYTHONPATH` to import stable repo helpers
+- FE must not reintroduce blocked identifier / leakage / target columns after preprocessing has removed them
+- real subprocess-backed `run_stage.py preprocess` verification remains the acceptance bar for this batch
+
+## 2026-04-25 — Wave 3 semantic cleaning primitives under the existing role contract
+
+**Context:** Preprocessing had already become much more observable and policy-aware, but the cleaning behavior itself still depended too heavily on whichever regex and coercion patterns the codegen model happened to invent on that run. We already had deterministic normalization for the most failure-prone columns, yet the primitive logic was embedded locally inside `preprocess.py` and invisible to the column-spec / codegen prompt contract. Wave 3 was about extracting that behavior into a reusable runtime library without breaking the current 12-role `semantic_role` taxonomy.
+
+**Changes (`src/bt5151_credit_risk/semantic_cleaning.py`, `src/bt5151_credit_risk/preprocess.py`, prompt skills, tests):**
+1. Added `semantic_cleaning.py` as the shared deterministic cleaning library for:
+   - dirty numeric parsing
+   - age parsing
+   - duration-to-months parsing
+   - missing-string handling
+   - multi-hot membership generation
+   - group-then-global numeric filling
+   - adulthood-based credit-history capping
+2. Refactored `preprocess.py` to import and use the shared helpers instead of maintaining duplicate local implementations for age parsing, credit-history parsing, missing-string normalization, group fill, and adulthood caps.
+3. Added `allowed_cleaning_primitives()` to the runtime payloads for:
+   - `generate_column_transform_spec()`
+   - `generate_preprocessing_code()`
+   - `repair_preprocessing_code()`
+4. Updated the skill contracts so Wave 3 remains additive to the existing schema:
+   - `skills/column-transform-spec.md` now allows `primitive`, `primitive_params`, and optional `semantic_subtype` while explicitly keeping the 12-role `semantic_role` taxonomy unchanged.
+   - `skills/generate-preprocessing-code.md` and `skills/repair-preprocessing-code.md` now tell codegen/repair to prefer the approved deterministic primitive behaviors over fresh ad hoc parsing logic when a primitive is declared.
+5. Added new RED→GREEN coverage in `tests/test_semantic_cleaning.py` plus payload assertions in `tests/test_preprocess.py`.
+
+**Verification:**
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_semantic_cleaning.py tests/test_preprocess.py -q` → 54 passed
+- `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_semantic_cleaning.py tests/test_preprocess.py tests/test_graph.py -q` → 69 passed
+- Real-run verification: `PYTHONPATH=src .venv/bin/python3 run_stage.py preprocess` → completed cleanly as `stage_preprocess_20260425_143722.log`
+  - preprocessing codegen/execution/validation passed on the initial generate attempt
+  - one audit-driven repair remained (`Type_of_Loan` “and” token artifact + `Monthly_Balance` lower-tail issue)
+  - repaired preprocessing then passed quality review
+  - deterministic normalization explicitly logged `Age`, `Credit_History_Age`, and `Type_of_Loan`
+  - the stage reached `train-models` and stopped successfully with trained models emitted
+
+**Must remain true:**
+- `semantic_role` stays on the existing 12-role contract; primitive hints are additive only.
+- `allowed_cleaning_primitives` must be exposed to both column-spec reasoning and preprocessing generate/repair calls.
+- Shared deterministic cleaning helpers should stay importable from one module instead of drifting back into duplicated local implementations.
+- Real preprocess-stage verification matters: Wave 3 is only successful if the generate/repair/validate loop still closes on a real run.
+
+## 2026-04-25 — Wave 2 real-run eligibility hardening
+
+**Context:** The first real `specs` run after the leakage-aware EDA split (`stage_specs_20260425_110138.log`) exposed two contract bugs that the unit tests had not yet covered. First, `feature_eligibility.py` looked for a legacy `leakage_rules.drop_columns` field, while the actual dataset-policy contract emits `leakage_policy.columns_to_drop`. Second, the near-unique identifier heuristic was applied to numeric measurements too, so high-cardinality continuous fields such as `Credit_Utilization_Ratio` could be mislabeled as identifier-like simply because most rows had distinct values.
+
+**Changes (`src/bt5151_credit_risk/feature_eligibility.py`, `tests/test_feature_eligibility.py`):**
+1. `apply_feature_eligibility()` now reads both:
+   - `leakage_policy.columns_to_drop` (the real contract)
+   - legacy `leakage_rules.drop_columns` (backward-compatible fallback)
+2. The near-unique identifier heuristic now skips features explicitly labeled `column_type="numeric"`, so continuous measurements are not blocked purely for having many distinct values.
+3. Added regression tests for:
+   - the real `leakage_policy.columns_to_drop` contract
+   - numeric near-unique measurements staying model-eligible
+4. Re-ran a real `specs` slice after the patch. The new run (`stage_specs_20260425_124151.log`) no longer shows `Name` in the model-eligible top-MI list, and `Credit_Utilization_Ratio` is no longer falsely flagged as a leakage alert.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_feature_eligibility.py tests/test_eda.py tests/test_graph.py tests/test_preprocess.py tests/test_feature_engineering.py -q` → 72 passed. Real-run verification: `PYTHONPATH=src .venv/bin/python3 run_stage.py specs` → completed cleanly; compare `stage_specs_20260425_110138.log` vs `stage_specs_20260425_124151.log`.
+
+**Must remain true:**
+- The dataset-policy contract for leakage drops is `leakage_policy.columns_to_drop`; backward compatibility is allowed, but the real contract must always work.
+- Numeric measurements must not be blocked as identifiers solely because their values are high-cardinality.
+- Real `specs` runs are part of Wave 2 verification; prompt/test green is not enough on its own.
+
+## 2026-04-25 — Wave 2 leakage-aware EDA split
+
+**Context:** EDA still exposed one mutual-information ranking (`top_discriminative_features`) that mixed trainable features with blocked identifier/group/leakage fields. That made the analytical chain too easy to misread: raw MI leaders could leak into EDA hypotheses, column-transform reasoning, or FE thinking as if they were legitimate modeling opportunities. We already had a late FE backstop that filtered identifier-like top-MI columns, but the earlier nodes were still reasoning from a noisier signal than the model would ever see.
+
+**Changes (`src/bt5151_credit_risk/feature_eligibility.py`, `src/bt5151_credit_risk/eda.py`, `src/bt5151_credit_risk/graph.py`, prompt skills):**
+1. Added `feature_eligibility.apply_feature_eligibility()` to classify raw high-MI fields into:
+   - `raw_top_discriminative_features`
+   - `model_eligible_top_discriminative_features`
+   - `leakage_alerts`
+   - per-feature eligibility decisions
+2. `build_eda_report()` now accepts `dataset_policy_spec` and persists both raw and model-eligible MI rankings. `top_discriminative_features` remains as a backward-compatible alias for the model-eligible list so older consumers still read the trainable ranking.
+3. Hard blocking is now policy-driven: target, group column, explicit identifier columns, configured leakage drop columns, and strong near-unique identifier behavior are filtered out of the model-eligible ranking. Identifier-like name heuristics create review alerts by default instead of unconditional blocks.
+4. The graph EDA node now passes `state.dataset_policy_spec` into `build_eda_report()` and logs leakage-alert counts plus reason/severity summaries.
+5. Prompt contracts were updated so downstream reasoning uses model-eligible MI for modeling decisions, while `raw_top_discriminative_features` and `leakage_alerts` remain audit-only context:
+   - `skills/generate-eda-hypotheses.md`
+   - `skills/column-transform-spec.md`
+   - `skills/generate-feature-engineering-code.md`
+   - `skills/reason-model-selection.md`
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_feature_eligibility.py tests/test_eda.py tests/test_graph.py tests/test_preprocess.py tests/test_feature_engineering.py -q` → 70 passed.
+
+**Must remain true:**
+- `top_discriminative_features` must continue to mean the **model-eligible** MI ranking for backward compatibility.
+- Raw high-MI identifier/group/leakage fields must remain visible via `raw_top_discriminative_features` and `leakage_alerts`, but they must not drive modeling hypotheses.
+- Name-based heuristics should stay review-first unless policy/spec or near-unique behavior makes the field clearly identifier-like.
+- The earlier FE top-MI safeguard remains a backstop, not the first line of defense.
+
+## 2026-04-25 — Wave 1 codegen observability scaffolding
+
+**Context:** We already had strong run-level provenance (`stage_*.log`, `analysis_bundle_*.json`, `trace_events_*.jsonl`), but the preprocessing / FE generate-repair loop was still too hard to audit after the fact. Generated code lived in temp workspaces, prompt payloads were not persisted in a stable run-scoped location, and Developer Trace could show that a codegen node ran without giving a deterministic path back to the exact generated attempt.
+
+**Changes (`src/bt5151_credit_risk/codegen_audit.py`, `src/bt5151_credit_risk/graph.py`, `src/bt5151_credit_risk/preprocess.py`, `src/bt5151_credit_risk/feature_engineering.py`, `src/bt5151_credit_risk/state.py`):**
+1. Added `codegen_audit.record_codegen_attempt()` as the shared persistence helper for codegen attempts. It writes stable run-scoped folders under `lab/logs/codegen/<run_id>/<family>/<attempt_label>/`.
+2. Preprocessing and FE codegen responses now carry private `_codegen_audit` metadata in-process so graph nodes can persist the redacted prompt payload and public model response without changing subprocess execution behavior.
+3. Generate / repair nodes now persist `generated.py`, `response.json`, `prompt_payload.json`, and `metadata.json` at attempt creation time.
+4. Inspect / execute / validate / audit nodes append `code_review`, `execution_log.json`, `validation_report.json`, and `audit_report.json` into the same attempt directory instead of leaving observability split across temp workspaces only.
+5. Added top-level state fields `preprocessing_codegen_snapshot_path` and `feature_engineering_codegen_snapshot_path`, plus symmetric FE codegen metadata, so the existing trace artifact pipeline can surface these paths automatically.
+6. Added regression coverage for redaction, metadata merge behavior, and graph-node exposure of the snapshot roots.
+7. Follow-up trace cleanup: `trace_events.py` now ignores underscore-prefixed private keys when flattening metrics, so `_codegen_audit.prompt_payload...` stays on disk in the snapshot folders instead of polluting structured JSONL trace metrics.
+
+**Verification:** `PYTHONPATH=src .venv/bin/python3 -m pytest tests/test_codegen_audit.py tests/test_trace_events.py tests/test_state.py tests/test_graph.py tests/test_preprocess.py tests/test_feature_engineering.py -q` → 79 passed.
+
+**Must remain true:**
+- Prompt payload snapshots must redact obvious secrets by key name before touching disk
+- Response snapshots must exclude private in-memory fields such as `_codegen_audit`
+- Structured trace metrics must also ignore private underscore-prefixed audit payloads
+- Snapshot roots must be exposed as top-level `_path` state keys so `trace_events.py` can detect them without special-case code
+- Execution / validation / audit reports for a given attempt must land in the same attempt folder, not a second parallel artifact tree
+
 ## 2026-04-17 — Live pipeline rail overlays JSONL completion status on raw logs
 
 **Context:** During a live run, the Developer Trace sidebar could show `global-xai` as blue/running even after the right-hand raw log card showed global XAI had produced its completion summaries. The backend was not stuck: the same run continued through `local-xai`, `shortcut-feature-audit`, `interpret-global-xai`, `interpret-local-xai`, packaging, inference, explanation, cache save, and run completion. The root cause was the live-trace compromise: raw logs are freshest but only contain `>>> node-start` markers, while structured JSONL records true node completion but can lag during long nodes.

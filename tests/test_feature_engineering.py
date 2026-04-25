@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 from bt5151_credit_risk.feature_engineering import (
     deterministic_feature_engineering_fallback_code,
@@ -113,6 +114,35 @@ def engineer_features(train_df, test_df, workspace_path):
     assert "Occupation_Engineer" in engineered.columns
 
 
+def test_execute_feature_engineering_allows_generated_code_to_import_repo_module(tmp_path, monkeypatch):
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+    train = pd.DataFrame({"Age": [30, 40]})
+    test = pd.DataFrame({"Age": [35]})
+    generated = {
+        "entrypoint": "engineer_features",
+        "code": """
+import json
+from bt5151_credit_risk.semantic_cleaning import parse_age_series
+
+def engineer_features(train_df, test_df, workspace_path):
+    train_df['Age'] = parse_age_series(train_df['Age'])
+    test_df['Age'] = parse_age_series(test_df['Age'])
+    train_df.to_csv(workspace_path / 'engineered_train.csv', index=False)
+    test_df.to_csv(workspace_path / 'engineered_test.csv', index=False)
+    (workspace_path / 'feature_engineering_report.json').write_text(json.dumps({'added': [], 'dropped': [], 'transformed': []}))
+    (workspace_path / 'feature_lineage.json').write_text(json.dumps({
+        'derived_features': [],
+        'dropped_features': [],
+        'passthrough_features': ['Age']
+    }))
+""",
+    }
+
+    result = execute_feature_engineering(train, test, generated, tmp_path)
+
+    assert result["success"] is True, result["execution_log"]
+
+
 def test_deterministic_feature_engineering_fallback_writes_valid_artifacts(tmp_path):
     train = pd.DataFrame({
         "Age": [30, 40, 50],
@@ -143,3 +173,52 @@ def test_deterministic_feature_engineering_fallback_writes_valid_artifacts(tmp_p
 
     assert execution["success"] is True, execution["execution_log"]
     assert report["passed"] is True, report.get("errors", []) + report.get("lineage_violations", [])
+
+
+def test_validate_feature_engineering_output_rejects_blocked_columns(tmp_path):
+    train = pd.DataFrame({"Age": [30.0], "Customer_ID": [123.0]})
+    test = pd.DataFrame({"Age": [31.0], "Customer_ID": [456.0]})
+
+    (tmp_path / "engineered_train.csv").write_text(train.to_csv(index=False), encoding="utf-8")
+    (tmp_path / "engineered_test.csv").write_text(test.to_csv(index=False), encoding="utf-8")
+    (tmp_path / "feature_engineering_report.json").write_text(
+        json.dumps({"added": [], "dropped": [], "transformed": []}),
+        encoding="utf-8",
+    )
+    (tmp_path / "feature_lineage.json").write_text(
+        json.dumps(
+            {
+                "derived_features": [],
+                "dropped_features": [],
+                "passthrough_features": ["Age", "Customer_ID"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    execution_result = {
+        "artifacts": {
+            "engineered_train.csv": str(tmp_path / "engineered_train.csv"),
+            "engineered_test.csv": str(tmp_path / "engineered_test.csv"),
+            "feature_engineering_report.json": str(tmp_path / "feature_engineering_report.json"),
+            "feature_lineage.json": str(tmp_path / "feature_lineage.json"),
+        }
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Age": {"action": "keep", "semantic_role": "numeric_continuous"},
+        }
+    }
+
+    report = validate_feature_engineering_output(
+        execution_result,
+        original_train_rows=1,
+        original_test_rows=1,
+        original_feature_count=1,
+        column_transform_spec=column_transform_spec,
+        train_frame_pre_fe=pd.DataFrame({"Age": [30.0]}),
+    )
+
+    assert report["passed"] is False
+    assert any(error["rule"] == "blocked_columns_absent" for error in report["errors"])

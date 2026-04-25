@@ -72,6 +72,8 @@ def _extract_warnings(update: dict[str, Any]) -> list[str]:
 def _extract_metrics(update: dict[str, Any]) -> dict[str, Any]:
     metrics: dict[str, Any] = {}
     for key, value in update.items():
+        if _is_private_trace_key(key):
+            continue
         if key in {"evaluation_results", "training_diagnostics", "global_xai_results"} and isinstance(value, dict):
             metrics.update(_flatten_numeric_dict(value, prefix=key))
         elif _is_metric_key(key) and _is_number(value):
@@ -104,6 +106,8 @@ def _infer_status(update: dict[str, Any], warnings: list[str]) -> str:
 def _flatten_numeric_dict(value: dict[str, Any], prefix: str) -> dict[str, Any]:
     flattened: dict[str, Any] = {}
     for key, item in value.items():
+        if _is_private_trace_key(key):
+            continue
         name = f"{prefix}.{key}"
         if _is_number(item):
             flattened[name] = item
@@ -147,6 +151,10 @@ def _is_metric_key(key: str) -> bool:
             "macro_f1_score",
         )
     )
+
+
+def _is_private_trace_key(key: Any) -> bool:
+    return str(key).startswith("_")
 
 
 def _is_number(value: Any) -> bool:

@@ -6,10 +6,16 @@ from scipy.stats import chi2_contingency
 from sklearn.feature_selection import f_classif, mutual_info_classif
 from sklearn.preprocessing import LabelEncoder
 
+from bt5151_credit_risk.feature_eligibility import apply_feature_eligibility
+
 logger = logging.getLogger(__name__)
 
 
-def build_eda_report(df: pd.DataFrame, target_column: str) -> dict:
+def build_eda_report(
+    df: pd.DataFrame,
+    target_column: str,
+    dataset_policy_spec: dict | None = None,
+) -> dict:
     """Programmatic EDA producing a structured report for downstream LLM nodes."""
     report = {}
 
@@ -39,9 +45,19 @@ def build_eda_report(df: pd.DataFrame, target_column: str) -> dict:
     # 6. Top discriminative features (mutual information + F-classif)
     #    Includes label-encoded categoricals so ordinal features like Credit_Mix
     #    and Month are visible alongside numerics.
-    report["top_discriminative_features"] = _compute_discriminative_features(
+    raw_top_discriminative_features = _compute_discriminative_features(
         df, numeric_cols, categorical_cols, target
     )
+    eligibility = apply_feature_eligibility(
+        raw_top_features=raw_top_discriminative_features,
+        feature_profiles=_build_feature_profiles(df, feature_cols),
+        dataset_policy_spec=dataset_policy_spec,
+    )
+    report["raw_top_discriminative_features"] = eligibility["raw_top_discriminative_features"]
+    report["model_eligible_top_discriminative_features"] = eligibility["model_eligible_top_discriminative_features"]
+    report["top_discriminative_features"] = eligibility["model_eligible_top_discriminative_features"]
+    report["leakage_alerts"] = eligibility["leakage_alerts"]
+    report["feature_eligibility"] = eligibility["feature_decisions"]
 
     # 7. Categorical association with target (Cramér's V + chi-squared)
     report["categorical_association"] = _compute_categorical_association(
@@ -49,6 +65,17 @@ def build_eda_report(df: pd.DataFrame, target_column: str) -> dict:
     )
 
     return report
+
+
+def _build_feature_profiles(df: pd.DataFrame, feature_cols: list[str]) -> dict[str, dict]:
+    profiles: dict[str, dict] = {}
+    for col in feature_cols:
+        series = df[col]
+        profiles[col] = {
+            "nunique": int(series.nunique(dropna=True)),
+            "non_null_count": int(series.notna().sum()),
+        }
+    return profiles
 
 
 def _compute_correlations(df: pd.DataFrame, numeric_cols: list[str]) -> dict:

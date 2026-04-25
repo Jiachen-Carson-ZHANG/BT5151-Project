@@ -1,5 +1,6 @@
 import ast
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -10,6 +11,21 @@ import pandas as pd
 
 from bt5151_credit_risk.llm import call_json_response
 from bt5151_credit_risk.skill_prompts import load_skill_prompt
+
+
+def _with_codegen_audit(result: dict, *, caller: str, prompt_payload: dict) -> dict:
+    enriched = dict(result)
+    enriched["_codegen_audit"] = {
+        "caller": caller,
+        "prompt_payload": prompt_payload,
+    }
+    return enriched
+
+
+def _public_codegen_payload(value: dict | None) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    return {k: v for k, v in value.items() if not str(k).startswith("_")}
 
 
 def _build_fe_artifact_paths(workspace_path: Path) -> dict[str, str]:
@@ -88,6 +104,9 @@ def generate_feature_engineering_code(
     if eda_report:
         payload["eda_insights"] = {
             "top_discriminative_features": eda_report.get("top_discriminative_features", [])[:10],
+            "raw_top_discriminative_features": eda_report.get("raw_top_discriminative_features", [])[:10],
+            "model_eligible_top_discriminative_features": eda_report.get("model_eligible_top_discriminative_features", [])[:10],
+            "leakage_alerts": eda_report.get("leakage_alerts", [])[:10],
             "high_correlation_pairs": eda_report.get("correlations", {}).get("high_pairs", [])[:10],
             "highly_skewed_columns": eda_report.get("skewness", {}).get("highly_skewed", {}),
         }
@@ -96,7 +115,8 @@ def generate_feature_engineering_code(
             "tested_predictions": eda_hypotheses.get("tested_predictions", []),
             "exploratory_leads": eda_hypotheses.get("exploratory_leads", []),
         }
-    return _call_fe_codegen_agent(system_prompt, payload, caller="generate-feature-engineering-code")
+    result = _call_fe_codegen_agent(system_prompt, payload, caller="generate-feature-engineering-code")
+    return _with_codegen_audit(result, caller="generate-feature-engineering-code", prompt_payload=payload)
 
 
 # Ask the LLM to repair failed feature engineering code.
@@ -112,7 +132,7 @@ def repair_feature_engineering_code(
 ) -> dict:
     system_prompt = load_skill_prompt("repair-feature-engineering-code")
     payload = {
-        "previous_generated_code": previous_generated_code,
+        "previous_generated_code": _public_codegen_payload(previous_generated_code),
         "code_review": code_review,
         "execution_log": execution_log,
         "validation_report": validation_report,
@@ -121,7 +141,8 @@ def repair_feature_engineering_code(
     }
     if deferred_categorical_columns:
         payload["deferred_categorical_columns"] = deferred_categorical_columns
-    return _call_fe_codegen_agent(system_prompt, payload, caller="repair-feature-engineering-code")
+    result = _call_fe_codegen_agent(system_prompt, payload, caller="repair-feature-engineering-code")
+    return _with_codegen_audit(result, caller="repair-feature-engineering-code", prompt_payload=payload)
 
 
 def deterministic_feature_engineering_fallback_code(
@@ -141,115 +162,19 @@ def deterministic_feature_engineering_fallback_code(
         "pass-through + categorical encoding."
     )
     code = r'''
-import json
-import numpy as np
-import pandas as pd
-from pathlib import Path
+from bt5151_credit_risk.deterministic_fe import write_deterministic_feature_artifacts
 
 
 def engineer_features(train_df, test_df, workspace_path):
-    workspace_path = Path(workspace_path)
-    report = {
-        "dropped": [],
-        "transformed": [],
-        "added": [],
-        "fallback": {
-            "used": __FE_FALLBACK_USED__,
-            "reason": __FE_FALLBACK_REASON__
-        },
-    }
-    lineage = {"derived_features": [], "dropped_features": [], "passthrough_features": []}
-
-    train_df = train_df.copy()
-    test_df = test_df.copy()
-    deferred = globals().get("deferred_categorical_columns", {}) or {}
-    object_cols = list(train_df.select_dtypes(exclude=["number", "bool"]).columns)
-    for col in object_cols:
-        nunique = int(deferred.get(col, train_df[col].nunique(dropna=True)))
-        if nunique <= 20:
-            train_values = train_df[col].fillna("__MISSING__").astype(str)
-            test_values = test_df[col].fillna("__MISSING__").astype(str)
-            dummies = pd.get_dummies(train_values, prefix=col, dtype=int)
-            test_dummies = pd.get_dummies(test_values, prefix=col, dtype=int)
-            test_dummies = test_dummies.reindex(columns=dummies.columns, fill_value=0)
-            train_df = pd.concat([train_df.drop(columns=[col]), dummies], axis=1)
-            test_df = pd.concat([test_df.drop(columns=[col]), test_dummies], axis=1)
-            report["transformed"].append({
-                "column": col,
-                "transform": "one_hot",
-                "rationale": "deterministic fallback encoding for deferred categorical"
-            })
-            lineage["derived_features"].append({
-                "feature": col,
-                "operation": "one_hot",
-                "inputs": [col],
-                "input_stage": "pre_fe_raw_categorical",
-            })
-        else:
-            freq = train_df[col].fillna("__MISSING__").astype(str).value_counts(normalize=True).to_dict()
-            train_df[col] = train_df[col].fillna("__MISSING__").astype(str).map(freq).fillna(0.0)
-            test_df[col] = test_df[col].fillna("__MISSING__").astype(str).map(freq).fillna(0.0)
-            report["transformed"].append({
-                "column": col,
-                "transform": "frequency_encode",
-                "rationale": "deterministic fallback compact encoding for high-cardinality categorical"
-            })
-            lineage["derived_features"].append({
-                "feature": col,
-                "operation": "frequency_encode",
-                "inputs": [col],
-                "input_stage": "pre_fe_raw_categorical",
-            })
-
-    # Coerce any remaining bools/numerics safely and fill using train statistics.
-    all_columns = list(train_df.columns)
-    for col in all_columns:
-        if col not in test_df.columns:
-            test_df[col] = 0
-        if train_df[col].dtype == bool:
-            train_df[col] = train_df[col].astype(int)
-            test_df[col] = test_df[col].astype(int)
-        else:
-            train_df[col] = pd.to_numeric(train_df[col], errors="coerce")
-            test_df[col] = pd.to_numeric(test_df[col], errors="coerce")
-        clean_train = train_df[col].replace([np.inf, -np.inf], np.nan)
-        median = clean_train.median()
-        if pd.isna(median):
-            median = 0.0
-        train_df[col] = clean_train.fillna(float(median))
-        test_df[col] = test_df[col].replace([np.inf, -np.inf], np.nan).fillna(float(median))
-
-    # Align test to train exactly; drop unexpected test-only columns.
-    test_df = test_df.reindex(columns=train_df.columns, fill_value=0)
-
-    one_hot_parents = {
-        entry["feature"]
-        for entry in lineage["derived_features"]
-        if entry.get("operation") == "one_hot"
-    }
-    derived_exact = {
-        entry["feature"]
-        for entry in lineage["derived_features"]
-        if entry.get("operation") != "one_hot"
-    }
-    passthrough = []
-    for col in train_df.columns:
-        if col in derived_exact:
-            continue
-        if any(col.startswith(f"{parent}_") for parent in one_hot_parents):
-            continue
-        passthrough.append(col)
-    lineage["passthrough_features"] = passthrough
-
-    non_num_train = train_df.select_dtypes(exclude=["number", "bool"]).columns.tolist()
-    non_num_test = test_df.select_dtypes(exclude=["number", "bool"]).columns.tolist()
-    assert not non_num_train, f"Non-numeric columns in train: {non_num_train}"
-    assert not non_num_test, f"Non-numeric columns in test: {non_num_test}"
-
-    train_df.to_csv(workspace_path / "engineered_train.csv", index=False)
-    test_df.to_csv(workspace_path / "engineered_test.csv", index=False)
-    (workspace_path / "feature_engineering_report.json").write_text(json.dumps(report, indent=2))
-    (workspace_path / "feature_lineage.json").write_text(json.dumps(lineage, indent=2))
+    write_deterministic_feature_artifacts(
+        train_df,
+        test_df,
+        workspace_path,
+        deferred_categorical_columns=globals().get("deferred_categorical_columns", {}) or {},
+        blocked_columns=globals().get("blocked_feature_columns", []) or [],
+        fallback_used=__FE_FALLBACK_USED__,
+        reason=__FE_FALLBACK_REASON__,
+    )
 '''
     code = code.replace("__FE_FALLBACK_USED__", repr(bool(fallback_used)))
     code = code.replace("__FE_FALLBACK_REASON__", json.dumps(reason))
@@ -291,6 +216,7 @@ def execute_feature_engineering(
     code_path = workspace_path / "generated_feature_engineering.py"
     runner_path = workspace_path / "_execute_feature_engineering.py"
     deferred_path = workspace_path / "deferred_categorical_columns.json"
+    repo_src_path = Path(__file__).resolve().parents[1]
 
     train_frame.to_csv(train_path, index=False)
     test_frame.to_csv(test_path, index=False)
@@ -314,12 +240,16 @@ def execute_feature_engineering(
                 "    test_path = Path(sys.argv[3])",
                 "    workspace_path = Path(sys.argv[4])",
                 "    deferred_path = Path(sys.argv[5])",
+                "    repo_src_path = Path(sys.argv[6])",
                 f"    entrypoint_name = {entrypoint_name!r}",
+                "    if str(repo_src_path) not in sys.path:",
+                "        sys.path.insert(0, str(repo_src_path))",
                 '    spec = importlib.util.spec_from_file_location("generated_feature_engineering", code_path)',
                 "    module = importlib.util.module_from_spec(spec)",
                 "    assert spec.loader is not None",
                 "    spec.loader.exec_module(module)",
                 "    module.deferred_categorical_columns = json.loads(deferred_path.read_text(encoding='utf-8'))",
+                "    module.blocked_feature_columns = globals().get('blocked_feature_columns', [])",
                 "    entrypoint = getattr(module, entrypoint_name, None)",
                 "    if not callable(entrypoint):",
                 "        raise AttributeError(f\"Entrypoint '{entrypoint_name}' was not found or is not callable.\")",
@@ -337,6 +267,12 @@ def execute_feature_engineering(
     )
 
     timeout_seconds = 120
+    env = os.environ.copy()
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    pythonpath_parts = [str(repo_src_path)]
+    if existing_pythonpath:
+        pythonpath_parts.append(existing_pythonpath)
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     try:
         completed = subprocess.run(
             [
@@ -347,12 +283,14 @@ def execute_feature_engineering(
                 str(test_path),
                 str(workspace_path),
                 str(deferred_path),
+                str(repo_src_path),
             ],
             cwd=workspace_path,
             capture_output=True,
             text=True,
             timeout=timeout_seconds,
             check=False,
+            env=env,
         )
         execution_log = {
             "returncode": completed.returncode,
@@ -881,6 +819,7 @@ def validate_feature_engineering_output(
     deferred_categoricals: dict | None = None,
     top_mi_features: list[str] | None = None,
     train_frame_pre_fe: pd.DataFrame | None = None,
+    column_transform_spec: dict | None = None,
 ) -> dict:
     """
     deferred_categoricals: {col_name: nunique} for object-dtype columns in the preprocessed
@@ -922,6 +861,35 @@ def validate_feature_engineering_output(
                 f"unless it is a deterministic duplicate or leakage feature. "
                 f"Restore '{feat}' or an explicit derived form (e.g. '{feat}_log', '{feat}_bin').",
             )
+
+    def check_blocked_columns_absent(output_columns: list[str], view_label: str = "") -> None:
+        transforms = (column_transform_spec or {}).get("transforms") or (column_transform_spec or {}).get("columns") or {}
+        blocked = []
+        for feature_name, spec in transforms.items():
+            if not isinstance(spec, dict):
+                continue
+            role = str(spec.get("semantic_role") or "")
+            action = str(spec.get("action") or "keep").lower()
+            if action in {"drop", "quarantine"} or role in {"identifier", "group_identifier", "target", "leakage_risk_feature"}:
+                blocked.append(str(feature_name))
+
+        if not blocked:
+            checks["blocked_columns_absent"] = True
+            return
+
+        leaked = []
+        output_set = set(output_columns)
+        for feature_name in blocked:
+            if feature_name in output_set or any(col.startswith(f"{feature_name}_") for col in output_set):
+                leaked.append(feature_name)
+        label = f"[{view_label}] " if view_label else ""
+        add_check(
+            "blocked_columns_absent" if not view_label else f"{view_label}_blocked_columns_absent",
+            not leaked,
+            f"{label}Blocked preprocessing columns leaked back into FE output: {leaked[:10]}. "
+            f"Columns with action=drop/quarantine or roles identifier/group_identifier/target/"
+            f"leakage_risk_feature must remain absent after FE.",
+        )
 
     report_path = Path(artifacts.get("feature_engineering_report.json", ""))
     feature_formulas: dict[str, str] = {}
@@ -1019,6 +987,7 @@ def validate_feature_engineering_output(
 
                 # Top-MI protection: top-5 MI raw features must not be silently dropped.
                 check_top_mi_not_dropped(list(train_df.columns), view_label=view_name)
+                check_blocked_columns_absent(list(train_df.columns), view_label=view_name)
 
                 # Identity-preservation check for tree_view: low-cardinality deferred
                 # categoricals (≤20 unique values) must NOT appear as a single float column
@@ -1129,6 +1098,7 @@ def validate_feature_engineering_output(
             )
             # Top-MI protection: top-5 MI raw features must not be silently dropped.
             check_top_mi_not_dropped(list(train_df.columns))
+            check_blocked_columns_absent(list(train_df.columns))
             views["default"] = {
                 "train_artifact": "engineered_train.csv",
                 "test_artifact": "engineered_test.csv",

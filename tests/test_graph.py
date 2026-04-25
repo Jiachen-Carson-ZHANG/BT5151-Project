@@ -1,7 +1,9 @@
+import json
 import numpy as np
 import pandas as pd
 from langgraph.graph import StateGraph
 from sklearn.ensemble import RandomForestClassifier
+from pathlib import Path
 from types import SimpleNamespace
 
 import bt5151_credit_risk.graph as graph_module
@@ -167,6 +169,128 @@ def test_generate_feature_engineering_defaults_to_deterministic_safe_path(monkey
     assert result["feature_engineering_hypothesis"]["interactions_rationale"].startswith(
         "Deterministic feature engineering"
     )
+
+
+def test_generate_preprocessing_code_node_exposes_snapshot_path(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_generate_preprocessing_code(*args, **kwargs):
+        return {
+            "code": "def run_preprocessing(raw_df, workspace_path):\n    return raw_df\n",
+            "entrypoint": "run_preprocessing",
+        }
+
+    def fake_record_codegen_attempt(**kwargs):
+        captured.update(kwargs)
+        return tmp_path / "lab" / "logs" / "codegen" / "20260425_120000" / "preprocessing" / "01_generate_preprocessing_code"
+
+    monkeypatch.setattr(graph_module, "generate_preprocessing_code", fake_generate_preprocessing_code)
+    monkeypatch.setattr(graph_module, "record_codegen_attempt", fake_record_codegen_attempt)
+
+    state = SimpleNamespace(
+        raw_frame=pd.DataFrame({"Age": [30, 40]}),
+        dataset_profile={"row_count": 2},
+        dataset_policy_spec={"target_column": "Credit_Score"},
+        column_transform_spec={"transforms": {}},
+        raw_dataset_path=str(tmp_path / "train.csv"),
+        run_id="20260425_120000",
+    )
+
+    result = graph_module.generate_preprocessing_code_node(state)
+
+    assert result["preprocessing_codegen_snapshot_path"].endswith("/preprocessing")
+    assert result["preprocessing_codegen_metadata"]["attempt_label"] == "01_generate_preprocessing_code"
+    assert captured["family"] == "preprocessing"
+    assert captured["run_id"] == "20260425_120000"
+
+
+def test_generate_feature_engineering_code_node_exposes_snapshot_path(monkeypatch, tmp_path):
+    captured = {}
+
+    def fake_record_codegen_attempt(**kwargs):
+        captured.update(kwargs)
+        return tmp_path / "lab" / "logs" / "codegen" / "20260425_120001" / "feature_engineering" / "01_generate_feature_engineering_code"
+
+    monkeypatch.setattr(graph_module, "FEATURE_ENGINEERING_MODE", "deterministic")
+    monkeypatch.setattr(graph_module, "record_codegen_attempt", fake_record_codegen_attempt)
+
+    state = SimpleNamespace(
+        train_frame=pd.DataFrame({"Age": [30, 40], "Occupation": ["Engineer", "Doctor"]}),
+        test_frame=pd.DataFrame({"Age": [35], "Occupation": ["Engineer"]}),
+        feature_columns=["Age", "Occupation"],
+        dataset_profile={"row_count": 3},
+        eda_report={},
+        eda_hypotheses={},
+        deferred_categorical_columns={"Occupation": 2},
+        raw_dataset_path=str(tmp_path / "train.csv"),
+        run_id="20260425_120001",
+    )
+
+    result = graph_module.generate_feature_engineering_code_node(state)
+
+    assert result["feature_engineering_codegen_snapshot_path"].endswith("/feature_engineering")
+    assert result["feature_engineering_codegen_metadata"]["attempt_label"] == "01_generate_feature_engineering_code"
+    assert captured["family"] == "feature_engineering"
+    assert captured["run_id"] == "20260425_120001"
+
+
+def test_train_models_node_persists_tuning_artifacts(monkeypatch, tmp_path):
+    def fake_build_candidate_models():
+        return {"logistic_regression": object()}
+
+    def fake_reason_hyperparameter_grids(**kwargs):
+        return {
+            "grids": {"logistic_regression": {"model__C": {"type": "float", "low": 0.1, "high": 1.0}}},
+            "reasoning": "synthetic",
+        }
+
+    def fake_tune_models(
+        models,
+        grids,
+        train_frame,
+        train_target,
+        sample_weights=None,
+        validation_policy=None,
+        train_group_values=None,
+        train_time_values=None,
+    ):
+        return (
+            {"logistic_regression": object()},
+            {"logistic_regression": {"best_params": {"model__C": 0.5}, "best_cv_score": 0.66}},
+            {"logistic_regression": [{"number": 0, "value": 0.66, "params": {"model__C": 0.5}}]},
+        )
+
+    monkeypatch.setattr(graph_module, "build_candidate_models", fake_build_candidate_models)
+    monkeypatch.setattr(graph_module, "reason_hyperparameter_grids", fake_reason_hyperparameter_grids)
+    monkeypatch.setattr(graph_module, "tune_models", fake_tune_models)
+    monkeypatch.setattr(graph_module, "extract_learning_curves", lambda model, model_name: None)
+
+    state = SimpleNamespace(
+        raw_dataset_path=str(tmp_path / "train.csv"),
+        run_id="20260425_180000",
+        train_frame=pd.DataFrame({"Age": [25, 35, 45]}),
+        train_target=pd.Series([0, 1, 2]),
+        train_group_values=np.array(["C1", "C2", "C3"]),
+        train_time_values=None,
+        dataset_policy_spec={"validation_policy": {"type": "grouped_entity", "group_column": "Customer_ID"}},
+        dataset_profile={"target_distribution": {"Good": 1, "Poor": 1, "Standard": 1}},
+        feature_columns=["Age"],
+        train_views=None,
+        model_view_map=None,
+        feature_columns_by_view=None,
+        column_transform_spec={"transforms": {}},
+    )
+
+    result = graph_module.train_models_node(state)
+
+    artifact_root = Path(result["tuning_artifact_path"])
+    assert artifact_root.is_dir()
+    assert (artifact_root / "trial_history.json").is_file()
+    assert (artifact_root / "grids.json").is_file()
+    assert (artifact_root / "summary.json").is_file()
+    summary = json.loads((artifact_root / "summary.json").read_text(encoding="utf-8"))
+    assert summary["validation_policy"]["type"] == "grouped_entity"
+    assert summary["tuning_results"]["logistic_regression"]["best_cv_score"] == 0.66
 
 
 def test_route_after_quality_review_only_accepts_minor_issues_after_retries():
@@ -339,14 +463,19 @@ def test_compiled_graph_runs_new_preprocessing_loop_end_to_end(tmp_path, monkeyp
     def fake_extract_learning_curves(model, model_name):
         return None
 
-    def fake_build_eda_report(df, target_column):
+    def fake_build_eda_report(df, target_column, dataset_policy_spec=None):
         call_sequence.append("exploratory-data-analysis")
+        assert dataset_policy_spec is not None
+        assert dataset_policy_spec["target_column"] == "Credit_Score"
         return {
             "correlations": {"high_pairs": [], "matrix_shape": [2, 2]},
             "class_separability": {"class_means": {}, "anova_top_features": []},
             "skewness": {"all": {}, "highly_skewed": {}},
             "missing_patterns": {"missing_pct": {}, "mnar_suspects": []},
             "cardinality": {"all": {}, "high_cardinality": []},
+            "raw_top_discriminative_features": [],
+            "model_eligible_top_discriminative_features": [],
+            "leakage_alerts": [],
             "top_discriminative_features": [],
         }
 
@@ -523,6 +652,37 @@ def test_validate_feature_engineering_node_filters_identifier_top_mi_features(mo
     graph_module.validate_feature_engineering_node(state)
 
     assert captured["top_mi_features"] == ["Annual_Income", "Outstanding_Debt", "Credit_Mix"]
+
+
+def test_exploratory_data_analysis_node_passes_dataset_policy_to_eda_builder(monkeypatch):
+    captured = {}
+
+    def fake_build_eda_report(df, target_column, dataset_policy_spec=None):
+        captured["target_column"] = target_column
+        captured["dataset_policy_spec"] = dataset_policy_spec
+        return {
+            "correlations": {"high_pairs": [], "matrix_shape": [0, 0]},
+            "class_separability": {"class_means": {}, "anova_top_features": []},
+            "skewness": {"all": {}, "highly_skewed": {}},
+            "missing_patterns": {"missing_pct": {}, "mnar_suspects": []},
+            "cardinality": {"all": {}, "high_cardinality": []},
+            "raw_top_discriminative_features": [],
+            "model_eligible_top_discriminative_features": [],
+            "top_discriminative_features": [],
+            "leakage_alerts": [],
+        }
+
+    monkeypatch.setattr(graph_module, "build_eda_report", fake_build_eda_report)
+    state = SimpleNamespace(
+        dataset_policy_spec={"target_column": "Credit_Score", "group_column": "Customer_ID"},
+        raw_frame=pd.DataFrame({"Customer_ID": ["C1"], "Credit_Score": ["Good"]}),
+    )
+
+    result = graph_module.exploratory_data_analysis_node(state)
+
+    assert captured["target_column"] == "Credit_Score"
+    assert captured["dataset_policy_spec"] == {"target_column": "Credit_Score", "group_column": "Customer_ID"}
+    assert result["eda_report"]["top_discriminative_features"] == []
 
 
 # ---------------------------------------------------------------------------

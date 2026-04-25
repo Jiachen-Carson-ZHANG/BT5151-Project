@@ -183,6 +183,8 @@ def test_generate_column_transform_spec_uses_runtime_skill_prompt(sample_frame, 
     assert captured["payload"]["sample_rows"] == sample_frame.head(10).to_dict(orient="records")
     assert "column_profiles" in captured["payload"]
     assert captured["payload"]["dataset_policy_spec"] == policy
+    assert "allowed_cleaning_primitives" in captured["payload"]
+    assert "parse_age_series" in captured["payload"]["allowed_cleaning_primitives"]
     assert spec["transforms"]["Age"]["imputation"] == "median"
     assert spec["transforms"]["Occupation"]["encoding"] == "one_hot"
 
@@ -229,6 +231,9 @@ def test_generate_preprocessing_code_uses_runtime_prompt_and_payload_context(sam
     assert captured["payload"]["columns"] == sample_frame.columns.tolist()
     assert captured["payload"]["sample_rows"] == sample_frame.head(10).to_dict(orient="records")
     assert "column_profiles" in captured["payload"]
+    assert "allowed_cleaning_primitives" in captured["payload"]
+    assert "parse_age_series" in captured["payload"]["allowed_cleaning_primitives"]
+    assert "parse_duration_months" in captured["payload"]["allowed_cleaning_primitives"]
 
 
 def test_repair_preprocessing_code_uses_runtime_prompt_and_failure_context(sample_frame, monkeypatch):
@@ -297,6 +302,8 @@ def test_repair_preprocessing_code_uses_runtime_prompt_and_failure_context(sampl
     assert captured["payload"]["dataset_profile"] == dataset_profile
     assert captured["payload"]["dataset_policy_spec"] == dataset_policy_spec
     assert captured["payload"]["column_transform_spec"] == column_transform_spec
+    assert "allowed_cleaning_primitives" in captured["payload"]
+    assert "multi_hot_membership" in captured["payload"]["allowed_cleaning_primitives"]
 
 
 def test_inspect_preprocessing_code_rejects_subprocess_import():
@@ -848,6 +855,78 @@ def test_normalize_preprocessing_artifacts_handles_fractional_group_median_witho
     assert report["applied"] is True
     assert report["skipped"] == []
     assert normalized.loc[2, "Credit_History_Age"] == 18.0
+
+
+def test_normalize_preprocessing_artifacts_enforces_declared_numeric_bounds(tmp_path):
+    raw_frame = pd.DataFrame(
+        {
+            "Customer_ID": ["C1", "C1", "C2"],
+            "Credit_Score": ["Good", "Good", "Poor"],
+            "Monthly_Inhand_Salary": [1500.0, 36160.17, 8000.0],
+            "Total_EMI_per_month": [500.0, 82331.0, 750.0],
+            "Num_Credit_Inquiries": [2.0, 1000.0, 4.0],
+        }
+    )
+    cleaned_frame = raw_frame.drop(columns=["Customer_ID", "Credit_Score"]).copy()
+    feature_frame = cleaned_frame.copy()
+
+    raw_frame_path = tmp_path / "raw_frame.csv"
+    cleaned_frame_path = tmp_path / "cleaned_frame.csv"
+    feature_frame_path = tmp_path / "feature_frame.csv"
+    raw_frame.to_csv(raw_frame_path, index=False)
+    cleaned_frame.to_csv(cleaned_frame_path, index=False)
+    feature_frame.to_csv(feature_frame_path, index=False)
+
+    execution_result = {
+        "workspace_path": str(tmp_path),
+        "raw_frame_path": str(raw_frame_path),
+        "artifacts": {
+            "cleaned_frame.csv": str(cleaned_frame_path),
+            "feature_frame.csv": str(feature_frame_path),
+        },
+    }
+    column_transform_spec = {
+        "transforms": {
+            "Customer_ID": {"action": "drop", "semantic_role": "group_identifier"},
+            "Monthly_Inhand_Salary": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "primitive": "parse_dirty_numeric",
+                "primitive_params": {"bounds": [0, 20000]},
+                "cleaning": "clip to [0,20000]",
+            },
+            "Total_EMI_per_month": {
+                "action": "keep",
+                "semantic_role": "numeric_continuous",
+                "primitive": "parse_dirty_numeric",
+                "primitive_params": {"bounds": [0, 50000]},
+                "cleaning": "clip to [0,50000]",
+            },
+            "Num_Credit_Inquiries": {
+                "action": "keep",
+                "semantic_role": "numeric_count",
+                "primitive": "parse_dirty_numeric",
+                "primitive_params": {"lower_bound": 0, "upper_bound": 100},
+                "cleaning": "mark values <0 or >100 as NaN",
+            },
+        }
+    }
+
+    report = normalize_preprocessing_artifacts(execution_result, column_transform_spec)
+
+    normalized_feature = pd.read_csv(feature_frame_path)
+    normalized_cleaned = pd.read_csv(cleaned_frame_path)
+
+    assert report["applied"] is True
+    assert {
+        "Monthly_Inhand_Salary",
+        "Total_EMI_per_month",
+        "Num_Credit_Inquiries",
+    }.issubset(set(report["normalized_columns"]))
+    assert normalized_feature["Monthly_Inhand_Salary"].tolist() == [1500.0, 20000.0, 8000.0]
+    assert normalized_feature["Total_EMI_per_month"].tolist() == [500.0, 50000.0, 750.0]
+    assert normalized_feature["Num_Credit_Inquiries"].tolist() == [2.0, 100.0, 4.0]
+    assert normalized_cleaned.equals(normalized_feature)
 
 
 def test_validate_preprocessing_output_auto_normalizes_deterministic_columns(tmp_path):

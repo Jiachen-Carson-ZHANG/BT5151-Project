@@ -13,7 +13,7 @@ Given evaluation results, EDA insights, feature engineering hypothesis, tuning h
 
 1. **Compare metrics across models.** Look at macro_f1, weighted_f1, per-class precision/recall, and confusion matrices. Consider which model handles minority classes best.
 2. **Assess overfitting risk.** Compare CV scores (from tuning) to test scores. A large gap indicates overfitting.
-3. **Validate the FE hypothesis.** Compare the EDA top discriminative features and FE hypothesis with SHAP importance. Are the features the hypothesis predicted to be important actually showing up in SHAP? Flag any surprising results.
+3. **Validate the FE hypothesis.** Compare the EDA **model-eligible** top discriminative features and FE hypothesis with SHAP importance. Are the trainable features the hypothesis predicted to be important actually showing up in SHAP? Flag any surprising results. Raw high-MI identifier/leakage alerts are audit findings, not failed FE opportunities.
 4. **Consider interpretability.** Simpler models with comparable performance may be preferred, especially in regulated or stakeholder-facing domains.
 5. **Make a recommendation.** Select one model and explain why.
 
@@ -22,7 +22,9 @@ Given evaluation results, EDA insights, feature engineering hypothesis, tuning h
 - `evaluation_results` — per-model metrics (accuracy, macro_f1, weighted_f1, per_class, confusion_matrix)
 - `tuning_results` — per-model best_params and best_cv_score from Optuna
 - `global_shap_importance` — top-15 features by mean |SHAP| for each model
-- `eda_top_features` (optional) — top discriminative features from EDA (mutual information)
+- `eda_top_features` (optional) — top **model-eligible** discriminative features from EDA (mutual information)
+- `eda_raw_top_features` (optional) — raw pre-filter MI rankings for audit only
+- `eda_leakage_alerts` (optional) — blocked or suspicious high-MI fields that should not be treated as missing model signal
 - `fe_hypothesis` (optional) — feature engineering hypothesis (interactions_rationale, expected_impact)
 - `class_names` — list of class labels
 
@@ -44,3 +46,4 @@ Return **only** a raw JSON object (no markdown fences, no explanation text):
 - Prefer models with strong macro_f1 (treats all classes equally) over weighted_f1 for imbalanced datasets.
 - If two models have very similar performance (within 0.02 macro_f1), prefer the simpler/more interpretable one.
 - Always discuss the CV-test gap — a model with slightly lower test score but smaller gap may generalize better.
+- If a raw high-MI field was blocked as identifier/leakage, do not count its absence from SHAP as a modeling failure. Mention it as an audit observation only when relevant.
